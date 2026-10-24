@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.local/
+
+# Generated packages, screenshots and machine-specific diagnostics stay local.
+/artifacts/
+
+# Original conversations and handoff archives are private source material.
+/question_example/*
+!/question_example/README.md
+
+.env
+.env.*
+!.env.example
+*.pem
+*.key

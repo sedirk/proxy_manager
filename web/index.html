@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>流向 · 本机代理工作台</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <svg class="icon-definitions" aria-hidden="true"><defs>
+    <symbol id="i-flow" viewBox="0 0 24 24"><path d="M4 5v5a4 4 0 0 0 4 4h8a4 4 0 0 1 4 4v1M4 5h5M4 5v5m16 9h-5m5 0v-5M9 5h7a4 4 0 0 1 4 4v1M4 19h4a4 4 0 0 0 4-4V9"/></symbol>
+    <symbol id="i-scan" viewBox="0 0 24 24"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5M4 12h16m-8-5v10"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m8 5 7 7-7 7"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 4 12 8-12 8Z"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 4v3"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h16m-6-6 6 6-6 6"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5L20 7"/></symbol>
+    <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 3v12m-5-7 5-5 5 5M4 14v6h16v-6"/></symbol>
+    <symbol id="i-import" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4"/></symbol>
+    <symbol id="i-fit" viewBox="0 0 24 24"><path d="M3 8V3h5m8 0h5v5M3 16v5h5m8 0h5v-5M8 8h8v8H8Z"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v1"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a19 19 0 0 1 0 18 19 19 0 0 1 0-18"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6Z"/><path d="m8 12 3 3 5-6"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/></symbol>
+  </defs></svg>
+
+  <div class="workbench">
+    <header class="app-header">
+      <a class="brand" href="#" aria-label="流向工作台"><span class="brand-mark"><svg><use href="#i-flow"/></svg></span><span><strong>流向</strong><small>本机代理工作台</small></span></a>
+      <div class="header-divider"></div>
+      <span class="workspace-name">个人工作空间 <span class="local-tag">LOCAL</span></span>
+      <div class="header-actions"><span id="service-status" class="service-status"><i></i>连接本机服务…</span><button id="discover-button" class="button button-quiet"><svg><use href="#i-scan"/></svg>自动检测</button><button id="shutdown-button" class="text-button" title="关闭网页不会退出后台。退出服务会先恢复本工具系统接入并停止中继。">退出后台</button><button id="help-button" class="icon-button" aria-label="使用与能力边界"><svg><use href="#i-info"/></svg></button></div>
+    </header>
+
+    <section class="plan-bar" aria-label="方案与运行控制">
+      <div class="plan-heading"><div class="eyebrow">ROUTING WORKSPACE <span>/</span> 方案画布</div><div class="plan-title-row"><h1 id="plan-title">日常 · 下载与代理共存</h1><span id="save-status" class="draft-tag">设计方案</span><button id="rename-button" class="text-button">重命名</button></div><p>把通道接到出口，再用证据确认实际路径。<button id="restore-server-plan" class="text-button restore-server-plan" hidden>恢复服务器方案</button></p></div>
+      <div class="plan-actions"><div class="file-actions"><button id="import-button" class="icon-button" title="导入方案 JSON" aria-label="导入方案 JSON"><svg><use href="#i-import"/></svg></button><button id="export-button" class="icon-button" title="导出方案 JSON" aria-label="导出方案 JSON"><svg><use href="#i-export"/></svg></button><button id="save-button" class="button button-quiet">保存方案</button></div><button id="preview-button" class="button button-outline">预览影响</button><button id="start-button" class="button button-primary"><svg><use href="#i-play"/></svg>启动本地入口</button><button id="stop-button" class="button button-danger" disabled><svg><use href="#i-stop"/></svg>停止</button></div>
+    </section>
+
+    <main class="main-grid">
+      <aside class="library-panel panel" aria-label="应用与出口库">
+        <div class="panel-heading"><div><span class="section-kicker">SOURCES</span><h2>应用库</h2></div><span id="app-count" class="count-label">方案参考</span></div>
+        <label class="search-box"><svg><use href="#i-search"/></svg><input id="app-search" type="search" placeholder="查找应用或通道" aria-label="查找应用或通道"></label>
+        <div id="application-library" class="application-library"></div>
+        <div class="library-section"><span class="section-kicker">DESTINATIONS</span><h3>出口节点</h3><div class="destination-buttons"><button data-add-target="direct"><span class="mini-symbol direct">↗</span><span>直连<small>跟随系统路由，可指定网卡</small></span><svg><use href="#i-plus"/></svg></button><button data-add-target="http"><span class="mini-symbol proxy">⇄</span><span>HTTP / SOCKS5<small>连接已经存在的代理入口</small></span><svg><use href="#i-plus"/></svg></button><button data-add-target="block"><span class="mini-symbol block">⊘</span><span>阻断<small>拒绝此中继收到的请求</small></span><svg><use href="#i-plus"/></svg></button></div></div>
+        <div class="library-footnote"><svg><use href="#i-lock"/></svg><p><strong>保留当前工作连接</strong>本工具默认不重启 Codex，不修改它的进程环境、代理或认证。</p></div>
+      </aside>
+
+      <section class="canvas-panel" aria-label="可编辑的路由方案画布">
+        <div class="canvas-topline"><div class="canvas-view-actions"><button id="toggle-library" class="icon-button" aria-label="展开或收起应用库" title="展开应用库">≡</button><span class="canvas-view-label"><i></i>方案视图</span><span class="canvas-topline-note">接线 ≠ 已接管应用</span><button id="focus-view" class="text-button">聚焦通道</button></div><div class="canvas-view-actions"><button id="arrange-button" class="text-button">整理画布</button><button id="toggle-inspector" class="icon-button" aria-label="展开或收起节点属性" title="节点属性">☷</button></div></div>
+        <div id="graph-viewport" class="graph-viewport" tabindex="0" aria-label="路由节点画布。拖动节点，点击输出端再点击出口端口来接线。空格拖动画布，Ctrl 加滚轮缩放。">
+          <div id="graph-world" class="graph-world"><svg id="graph-connections" class="graph-connections" aria-label="方案连接"><defs><marker id="edge-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0 7 3.5 0 7"/></marker></defs><g id="edge-layer"></g><path id="pending-edge" class="pending-edge"/></svg><div id="node-layer"></div></div>
+          <div id="canvas-empty" class="canvas-empty" hidden><span class="empty-illustration">↗</span><h3>从一个应用开始</h3><p>将应用加入画布，再把输出接到出口。所有改动先作为方案保存。</p></div>
+        </div>
+        <div id="connection-hint" class="connection-hint" hidden><span>已选择输出，请点击一个出口的输入端口</span><button id="cancel-connection" class="text-button">取消 Esc</button></div>
+        <div class="canvas-bottomline"><span class="canvas-legend"><i class="legend-line"></i>设计连线 <i class="legend-line protected"></i>保留路径</span><div class="zoom-controls"><button id="zoom-out" aria-label="缩小画布">−</button><button id="zoom-value" title="点击查看全部节点总览">100%</button><button id="zoom-in" aria-label="放大画布">＋</button><span></span><button id="fit-button" aria-label="查看全部节点总览"><svg><use href="#i-fit"/></svg></button></div></div>
+      </section>
+
+      <aside class="inspector-panel panel" aria-label="节点属性与能力解释">
+        <div class="panel-heading"><div><span class="section-kicker">INSPECTOR</span><h2>节点属性</h2></div><span id="selection-type" class="count-label">通道</span><button id="close-inspector" class="icon-button" aria-label="收起节点属性"><svg><use href="#i-close"/></svg></button></div>
+        <div id="inspector-content" class="inspector-content"></div>
+        <details class="system-access"><summary><span><svg><use href="#i-shield"/></svg>高级 · 系统接入</span><svg><use href="#i-chevron"/></svg></summary><div class="system-access-body"><p>将一个已运行入口接到当前用户 WinINet 系统代理。会影响使用该设置的其他应用，需单独预览与确认。</p><label class="field"><span>接入通道</span><select id="system-channel"><option value="">先启动本地入口</option></select></label><button id="system-preview-button" class="button button-outline full-width">预览系统接入</button><div id="system-state" class="system-state" aria-live="polite"></div><div id="system-live-actions" hidden><button id="system-confirm-button" class="button button-primary full-width">连接正常，确认保留</button><button id="system-restore-button" class="button button-quiet full-width">恢复原系统代理</button></div></div></details>
+      </aside>
+    </main>
+
+    <section class="evidence-dock" aria-label="运行活动与分层证据">
+      <div class="evidence-toolbar"><div class="dock-tabs" role="tablist"><button id="tab-activity" role="tab" aria-selected="true" aria-controls="activity-pane" data-dock="activity">活动 <span id="event-count">0</span></button><button id="tab-evidence" role="tab" aria-selected="false" aria-controls="evidence-pane" data-dock="evidence">分层证据</button><button id="tab-runtime" role="tab" aria-selected="false" aria-controls="runtime-pane" data-dock="runtime">运行入口</button></div><div class="dock-tools"><button id="diagnostic-export-button" class="text-button">导出脱敏诊断</button><button id="expand-dock" class="icon-button" title="展开或收起活动面板" aria-label="展开活动面板"><svg><use href="#i-chevron"/></svg></button></div></div>
+      <div class="evidence-levels" aria-label="当前证据层级"><span id="level-design"><i></i>设计方案</span><span id="level-observed"><i></i>本机尚未检测</span><span id="level-relay"><i></i>中继未启动</span><span id="level-app"><i></i>真实应用未验证</span></div>
+      <div id="activity-pane" class="dock-pane" role="tabpanel" aria-labelledby="tab-activity"><div id="activity-list" class="activity-list"></div></div>
+      <div id="evidence-pane" class="dock-pane" role="tabpanel" aria-labelledby="tab-evidence" hidden><div id="evidence-grid" class="evidence-grid"></div></div>
+      <div id="runtime-pane" class="dock-pane" role="tabpanel" aria-labelledby="tab-runtime" hidden><div id="runtime-list" class="runtime-list"></div></div>
+    </section>
+    <footer class="status-bar"><span id="workspace-status"><i></i>方案编辑 · 尚未改变系统网络</span><span>空格拖动画布 <kbd>Ctrl</kbd> + 滚轮缩放 <span class="status-separator">/</span> <kbd>Esc</kbd> 取消接线</span></footer>
+  </div>
+
+  <input id="import-file" type="file" accept="application/json,.json" hidden>
+  <dialog id="preview-dialog" class="modal"><div class="modal-heading"><div><span class="section-kicker">IMPACT PREVIEW</span><h2>预览实际影响</h2></div><button class="icon-button" data-close-dialog aria-label="关闭预览"><svg><use href="#i-close"/></svg></button></div><div id="preview-content" class="modal-content"></div><div class="modal-actions"><button class="button button-quiet" data-close-dialog>返回画布</button><button id="preview-start-button" class="button button-primary">只启动本地入口</button></div></dialog>
+  <dialog id="system-dialog" class="modal"><div class="modal-heading"><div><span class="section-kicker">SYSTEM INTEGRATION</span><h2>预览系统接入</h2></div><button class="icon-button" data-close-dialog aria-label="关闭系统接入预览"><svg><use href="#i-close"/></svg></button></div><div id="system-preview-content" class="modal-content"></div><div class="modal-actions"><button class="button button-quiet" data-close-dialog>取消</button><button id="system-apply-button" class="button button-primary" disabled>应用并观察，未确认会回退</button></div></dialog>
+  <dialog id="help-dialog" class="modal"><div class="modal-heading"><div><span class="section-kicker">HOW IT WORKS</span><h2>接好方案，再确认实际路径</h2></div><button class="icon-button" data-close-dialog aria-label="关闭帮助"><svg><use href="#i-close"/></svg></button></div><div class="modal-content help-content"><ol><li><strong>先检测本机。</strong>识别代理入口、系统设置、环境变量、网卡和 DNS。监听存在不等于协议或出口可用。</li><li><strong>把通道接到出口。</strong>点击应用的输出端，再点击出口的输入端。域名规则属于对应通道，首次匹配优先。</li><li><strong>预览后启动本地入口。</strong>这里只启动环回中继。支持显式代理的应用需使用该入口；接线不会自动接管任意进程。</li><li><strong>用活动与分层证据验证。</strong>TCP、TLS、HTTP、WebSocket 握手及真实应用会话分别记录。启动成功不是整条链路成功。</li></ol><div class="notice">Codex 默认保留当前工作连接。RustDesk 经过 TUN 后的 DIRECT 不等于绕过 TUN；Steam 的新 CDN 需依据实际事件补充规则。系统接入是独立的高级操作，必须先预览。</div><p class="muted">快捷键：Ctrl+S 保存方案；Ctrl+Z 撤销画布编辑；Alt+方向键移动聚焦的节点；0 适应画布。</p></div><div class="modal-actions"><button class="button button-primary" data-close-dialog>回到工作台</button></div></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
