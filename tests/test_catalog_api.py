@@ -73,6 +73,9 @@ class CatalogApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn('catalog', value)
         self.assertIn('tools', value)
+        self.assertEqual(self.request('/api/app-routes', auth=False)[0], 403)
+        for action in ('save','launch'):
+            self.assertEqual(self.request('/api/app-routes/'+action,'POST',{},auth=False)[0],403)
 
 
 if __name__ == '__main__':

@@ -23,7 +23,7 @@ class Store:
             return json.loads(path.read_text(encoding='utf-8')) if path.exists() else default
 
     def write(self, name, value):
-        if name not in ('plan.json', 'snapshot.json', 'history.json', 'custom-apps.json'):
+        if name not in ('plan.json', 'snapshot.json', 'history.json', 'custom-apps.json', 'app-routes.json'):
             raise ValueError('未支持的状态文件')
         with self.lock:
             atomic_json(self.root / name, value)

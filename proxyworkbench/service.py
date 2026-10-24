@@ -96,6 +96,7 @@ class Service:
         self._catalog_cache = None
         self.guide_slots = threading.BoundedSemaphore(1)
         self.guide_checks = {}
+        self.route_sessions = {}
         self.custom_apps_error = None
         from .catalog import manual_apps_document
         try:
@@ -265,6 +266,75 @@ class Service:
             return {'catalog': self.catalog_state(), 'tools': copy.deepcopy(self.snapshot.get('network_tools', [])),
                     'snapshot_captured_at': self.snapshot.get('captured_at'), 'snapshot_stale': self.snapshot_stale,
                     'discovering': self.discovering, 'discovery_error': self.discovery_error}
+
+    def app_routes_state(self):
+        from .app_routes import parse, describe, route_key
+        with self.lock:
+            catalog=self.catalog_state()
+            error=None
+            try:records=parse(self.store.read('app-routes.json',{'schema_version':1,'routes':[]}))['routes']
+            except (ValueError,TypeError,OSError):
+                records=[];error='保存的应用连接设置无法读取；原文件保留，请修复 app-routes.json 后重试。'
+            by_key={item['key']:item for item in records}
+            routes=[]
+            for app in catalog['apps']:
+                executable=app.get('executable') or app['launch_profile'].get('executable')
+                item=describe(app,by_key.get(route_key(executable)) if executable else None)
+                item['session']=self.route_sessions.get(item['key'])
+                routes.append(item)
+            return {'catalog':catalog,'routes':routes,'tools':copy.deepcopy(self.snapshot.get('network_tools',[])),
+                    'error':error,'snapshot_captured_at':self.snapshot.get('captured_at')}
+
+    def _app_route(self, value):
+        from .app_routes import proxy_url, MODES
+        app=self._catalog()._apps.get(value.get('app_id'))
+        if not app or app['protected'] or not app['launch_profile']['available']:
+            raise ValueError('请先为该软件选择准确主程序；受保护组件不能在此重配')
+        mode=value.get('mode')
+        if mode not in MODES:raise ValueError('请选择支持的连接方式')
+        endpoint=proxy_url(value.get('proxy_url')) if mode=='http_environment' else ''
+        if endpoint:
+            allowed=[option['proxy_url'] for tool in self.snapshot.get('network_tools',[]) for option in tool['proxy_options'] if option['protocol']=='http']
+            allowed += [item['proxy_url'] for item in self.relay.status()['channels'] if item.get('proxy_url')]
+            if endpoint not in allowed:raise ValueError('该代理入口已变化或尚未被识别，请重新检测后连线')
+        return app,mode,endpoint
+
+    def app_route_save(self, value):
+        from .app_routes import parse,route_key
+        from .catalog import application_executable_path
+        with self.lock:
+            self._ensure_open()
+            app,mode,endpoint=self._app_route(value)
+            executable=application_executable_path(app['launch_profile']['executable'])
+            document=parse(self.store.read('app-routes.json',{'schema_version':1,'routes':[]}))
+            key=route_key(executable)
+            document['routes']=[record for record in document['routes'] if record['key']!=key]
+            document['routes'].append({'key':key,'executable':executable,'mode':mode,'proxy_url':endpoint,'updated_at':now()})
+            if len(document['routes'])>256:raise ValueError('最多保存 256 个软件的连接设置')
+            self.store.write('app-routes.json',document)
+            self.route_sessions.pop(key,None)
+            self.audit('保存可视化应用连接设置',{'app_id':app['id'],'mode':mode,'proxy_url':endpoint})
+            return self.app_routes_state()
+
+    def app_route_launch(self, value):
+        from .app_launch import launch
+        from .app_routes import parse,route_key
+        with self.lock:
+            self._ensure_open()
+            app=self._catalog()._apps.get(value.get('app_id'))
+            if not app:raise ValueError('应用记录已变化，请重新检测')
+            executable=app['launch_profile'].get('executable')
+            records=parse(self.store.read('app-routes.json',{'schema_version':1,'routes':[]}))['routes']
+            record=next((item for item in records if executable and item['key']==route_key(executable)),None)
+            if not record:raise ValueError('请先保存该软件的连接设置')
+            app,mode,endpoint=self._app_route({'app_id':app['id'],**record})
+        result=launch(executable,endpoint,mode)
+        with self.lock:
+            current=next((item for item in parse(self.store.read('app-routes.json',{'schema_version':1,'routes':[]}))['routes'] if item['key']==record['key']),None)
+            if current and current['mode']==mode and current['proxy_url']==endpoint:
+                self.route_sessions[record['key']]={'pid':result['pid'],'started_at':now(),'mode':mode,'proxy_url':endpoint}
+            self.audit('从可视化设置启动目标软件',{'app_id':app['id'],'pid':result['pid'],'mode':mode})
+            return {'launch':result,**self.app_routes_state()}
 
     def guide_check(self, value):
         from .troubleshoot import diagnose, problem_url

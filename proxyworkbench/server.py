@@ -124,6 +124,12 @@ class Handler(BaseHTTPRequestHandler):
                 result = service.catalog_state()
             elif key == ('GET', '/api/troubleshoot'):
                 result = service.guide_state()
+            elif key == ('GET', '/api/app-routes'):
+                result = service.app_routes_state()
+            elif key == ('POST', '/api/app-routes/save'):
+                result = service.app_route_save(value)
+            elif key == ('POST', '/api/app-routes/launch'):
+                result = service.app_route_launch(value)
             elif key == ('POST', '/api/troubleshoot/check'):
                 result = service.guide_check(value)
             elif key == ('POST', '/api/troubleshoot/profile'):

@@ -250,6 +250,11 @@ def main():
             manual_app = next(app for app in added['catalog']['apps'] if app['id'] == added['app_id'])
             manual_id = manual_app['manual_id']
             assert manual_app['manual'] and manual_id
+            visual_routes=api('/api/app-routes')
+            assert any(route['app_id']==added['app_id'] for route in visual_routes['routes'])
+            visual_saved=api('/api/app-routes/save',{'app_id':added['app_id'],'mode':'inherit'})
+            assert any(route['app_id']==added['app_id'] and route['saved'] and route['mode']=='inherit' for route in visual_saved['routes'])
+            assert not api('/api/state')['runtime']['running']
             duplicate = api('/api/catalog/apps', {'name': '手动清单验收', 'executable': str(manual_executable)})
             assert duplicate['duplicate'] is True
             assert len([app for app in duplicate['catalog']['apps'] if app.get('manual_id') == manual_id]) == 1
@@ -274,6 +279,9 @@ def main():
             report['persistent_state_survives_restart'] = True
             persisted = api('/api/catalog')
             assert any(app.get('manual_id') == manual_id for app in persisted['apps'])
+            visual_persisted=api('/api/app-routes')
+            assert any(route['app_id']==added['app_id'] and route['saved'] for route in visual_persisted['routes'])
+            report['visual_app_routes']={'save':True,'restart_persistence':True,'no_target_process_launched':True,'legacy_relay_not_started':True}
             guided = api('/api/troubleshoot')
             assert isinstance(guided['tools'], list) and isinstance(guided['catalog']['apps'], list)
             guided_check = api('/api/troubleshoot/check', {'app_id': added['app_id'],
@@ -283,6 +291,11 @@ def main():
             assert not api('/api/state')['runtime']['running']
             report['guided_diagnosis'] = {'api': True, 'real_loopback_target': True,
                                          'direct_success_needs_no_proxy_change': True, 'target_application_not_launched': True}
+            route_options=[option for tool in api('/api/app-routes')['tools'] for option in tool['proxy_options'] if option['protocol']=='http']
+            if route_options:
+                selected_route=api('/api/app-routes/save',{'app_id':added['app_id'],'mode':'http_environment','proxy_url':route_options[0]['proxy_url']})
+                assert any(route['app_id']==added['app_id'] and route['proxy_url']==route_options[0]['proxy_url'] for route in selected_route['routes'])
+                report['visual_app_routes']['detected_http_save']=True
             api('/api/discover', {})
             observed = api('/api/state')['snapshot']
             assert observed['platform'] == 'windows'

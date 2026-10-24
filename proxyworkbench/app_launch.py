@@ -64,7 +64,7 @@ def _running_images():
     return records if isinstance(records, list) else [records]
 
 
-def launch(executable, proxy_url):
+def launch(executable, proxy_url='', mode='http_environment'):
     if not _LOCK.acquire(blocking=False):
         raise RuntimeError('另一项启动正在进行，请等待结果')
     try:
@@ -76,15 +76,22 @@ def launch(executable, proxy_url):
         if any((os.path.normcase(os.path.abspath(item['ExecutablePath'])) == key if item.get('ExecutablePath') else
                 str(item.get('Name', '')).casefold() == Path(executable).name.casefold()) for item in images):
             raise ValueError('目标软件还在运行，请先关闭它，再点击“按方案启动”；工作台不会结束现有进程。')
-        # The service accepts only a successful check's local HTTP entrance.
+        if mode not in {'http_environment', 'clear_environment', 'inherit'}:
+            raise ValueError('不支持此应用连接方式')
         from urllib.parse import urlsplit
         import ipaddress
         parsed = urlsplit(proxy_url)
-        if (parsed.scheme != 'http' or not parsed.hostname or not ipaddress.ip_address(parsed.hostname).is_loopback
+        if mode == 'http_environment' and (parsed.scheme != 'http' or not parsed.hostname or not ipaddress.ip_address(parsed.hostname).is_loopback
                 or not parsed.port or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment):
             raise ValueError('启动方案的本机代理入口无效，请重新检测。')
-        environment = {key: value for key, value in os.environ.items() if key.upper() not in _PROXY_NAMES}
-        environment.update(HTTP_PROXY=proxy_url, HTTPS_PROXY=proxy_url, ALL_PROXY=proxy_url, NO_PROXY='localhost,127.0.0.1,::1')
+        environment = os.environ.copy() if mode == 'inherit' else {key: value for key, value in os.environ.items() if key.upper() not in _PROXY_NAMES}
+        arguments = []
+        browser = Path(executable).name.casefold() in {'chrome.exe', 'msedge.exe'}
+        if mode == 'http_environment':
+            environment.update(HTTP_PROXY=proxy_url, HTTPS_PROXY=proxy_url, ALL_PROXY=proxy_url, NO_PROXY='localhost,127.0.0.1,::1')
+            if browser:arguments.append('--proxy-server=' + proxy_url)
+        elif mode == 'clear_environment' and browser:
+            arguments.append('--no-proxy-server')
         environment['PYINSTALLER_RESET_ENVIRONMENT'] = '1'
         bundled = getattr(sys, '_MEIPASS', None)
         if bundled:
@@ -93,7 +100,7 @@ def launch(executable, proxy_url):
                 if item and not os.path.normcase(os.path.abspath(item)).startswith(bundle_key + os.sep)
                 and os.path.normcase(os.path.abspath(item)) != bundle_key)
         with _external_libraries():
-            child = subprocess.Popen([executable], cwd=str(Path(executable).parent), env=environment)
+            child = subprocess.Popen([executable, *arguments], cwd=str(Path(executable).parent), env=environment)
         return {'pid': child.pid, 'executable': executable,
                 'notice': '已按方案创建新进程，请在目标软件里重试原操作；这还不代表安装或登录成功。'}
     except (OSError, subprocess.TimeoutExpired) as exc:
