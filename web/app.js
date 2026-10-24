@@ -26,7 +26,7 @@
     {id:'rustdesk',name:'RustDesk 待验证',app_id:'rustdesk',default_target:'direct',rules:[]}
   ],dns_overrides:{},layout:{nodes:{},viewport:{x:0,y:0,zoom:1}}});
   const state = {plan:initialPlan(),snapshot:null,runtime:{running:false,channels:[]},system:{},history:[],events:[],activity:[],eventKeys:new Set(),selected:{kind:'channel',id:'steam'},dirty:false,connected:false,token:null,busy:false,preview:null,previewSignature:null,systemPreview:null,pending:null,undo:[],worldNodes:[],view:{x:30,y:40,zoom:.8},runtimeSignature:null,discovering:false,eventCursor:0,compact:innerWidth<=1000,focusMode:true,serverPlan:null,recoveredDraft:false,probeLayers:[],probeScope:''};
-  Object.assign(state,{workspace:'catalog',catalog:null,catalogLoading:false,catalogSignature:null,catalogSelected:null,catalogDrafts:{},profileResult:null,catalogMutationBusy:false,catalogRevision:0});
+  Object.assign(state,{workspace:'guide',catalog:null,catalogLoading:false,catalogSignature:null,catalogSelected:null,catalogDrafts:{},profileResult:null,catalogMutationBusy:false,catalogRevision:0});
   const category = appId => /codex|app-server/i.test(appId || '') ? 'codex' : /wows|warships|wgc/i.test(appId || '') ? 'wows' : /steam/i.test(appId || '') ? 'steam' : /rustdesk/i.test(appId || '') ? 'rustdesk' : /^(uu|netease_uu)$/i.test(appId || '') ? 'uu' : 'browser';
   const channel = id => state.plan.channels.find(c => c.id === id);
   const target = id => state.plan.targets.find(t => t.id === id);
@@ -210,13 +210,14 @@
   function renderAll() {renderHeader();renderLibrary();renderGraph();renderInspector();renderActivity();renderEvidence();renderRuntime();renderCatalog();}
 
   function switchWorkspace(name) {
-    state.workspace=name==='routing'?'routing':'catalog';$('.workbench').classList.toggle('catalog-active',state.workspace==='catalog');
+    state.workspace=['routing','guide'].includes(name)?name:'catalog';$('.workbench').classList.toggle('catalog-active',state.workspace==='catalog');$('.workbench').classList.toggle('guide-active',state.workspace==='guide');
     $$('[data-workspace]').forEach(button=>button.setAttribute('aria-selected',String(button.dataset.workspace===state.workspace)));
-    $('#catalog-workspace').hidden=state.workspace!=='catalog';$('#routing-workspace').hidden=state.workspace!=='routing';
+    $('#catalog-workspace').hidden=state.workspace!=='catalog';$('#routing-workspace').hidden=state.workspace!=='routing';$('#guide-workspace').hidden=state.workspace!=='guide';
     if(state.workspace==='routing')requestAnimationFrame(()=>{renderGraph();fit();});else{renderCatalog();refreshCatalog();}
     renderWorkspaceStatus();
+    document.dispatchEvent(new CustomEvent('flowdesk:workspace',{detail:{name:state.workspace}}));
   }
-  function renderWorkspaceStatus(){const observedAt=state.catalog?.snapshot_captured_at||state.snapshot?.captured_at;const date=observedAt?new Date(observedAt):null;$('#catalog-evidence-summary').textContent=!date?'尚未采集连接快照；自动检测后可查看设置、连接和日志线索。':`连接观察：${Number.isNaN(+date)?'时间未记录':date.toLocaleString('zh-CN',{hour12:false})}${state.discovering?' · 正在重新检测':state.snapshotStale||state.catalog?.snapshot_stale?' · 上次快照，尚未完成新检测':''}${state.discoveryError?' · 检测有未完成项，详见分层证据':''}。`;if(state.workspace==='catalog')$('#workspace-status').innerHTML=`<i></i>${state.catalogLoading?'正在读取应用设置线索':state.catalog?'应用与设置 · 观察结果不等于实际出口验证':'应用与设置 · 等待读取本机记录'}`;else $('#workspace-status').innerHTML=`<i></i>${state.runtime.running?(state.runtimeSignature&&state.runtimeSignature===routeSignature()?'本地中继运行中 · 真实应用请单独验证':'本地中继运行中 · 画布改动需重新预览应用'):'方案编辑 · 尚未改变系统网络'}`;}
+  function renderWorkspaceStatus(){const observedAt=state.catalog?.snapshot_captured_at||state.snapshot?.captured_at;const date=observedAt?new Date(observedAt):null;$('#catalog-evidence-summary').textContent=!date?'尚未采集连接快照；自动检测后可查看设置、连接和日志线索。':`连接观察：${Number.isNaN(+date)?'时间未记录':date.toLocaleString('zh-CN',{hour12:false})}${state.discovering?' · 正在重新检测':state.snapshotStale||state.catalog?.snapshot_stale?' · 上次快照，尚未完成新检测':''}${state.discoveryError?' · 检测有未完成项，详见分层证据':''}。`;if(state.workspace==='catalog')$('#workspace-status').innerHTML=`<i></i>${state.catalogLoading?'正在读取应用设置线索':state.catalog?'应用与设置 · 观察结果不等于实际出口验证':'应用与设置 · 等待读取本机记录'}`;else if(state.workspace==='guide')$('#workspace-status').innerHTML='<i></i>按问题引导 · 检测与实际操作分别确认';else $('#workspace-status').innerHTML=`<i></i>${state.runtime.running?(state.runtimeSignature&&state.runtimeSignature===routeSignature()?'本地中继运行中 · 真实应用请单独验证':'本地中继运行中 · 画布改动需重新预览应用'):'方案编辑 · 尚未改变系统网络'}`;}
   function catalogApps(){return Array.isArray(state.catalog?.apps)?state.catalog.apps:[];}
   function catalogApp(){return catalogApps().find(app=>app.id===state.catalogSelected);}
   function catalogValue(value,setting={}){
@@ -295,6 +296,7 @@
     state.catalogRevision++;state.catalog={...(state.catalog||{}),...result.catalog};state.catalogSignature=result.catalog.snapshot_captured_at||null;
     state.catalogSelected=catalogApps().some(app=>app.id===selected)?selected:catalogApps()[0]?.id||null;state.profileResult=null;
     renderCatalog();$('#catalog-detail').scrollTop=0;
+    document.dispatchEvent(new CustomEvent('flowdesk:catalog-mutated',{detail:{app_id:state.catalogSelected}}));
   }
   function showCatalogAdd(){
     if(state.catalogMutationBusy||!state.connected)return;$('#catalog-add-error').hidden=true;$('#catalog-add-status').textContent='可直接粘贴绝对 .exe 路径，也可以浏览选择。';
@@ -419,5 +421,7 @@
   $('#catalog-detail').addEventListener('input',event=>{const app=catalogApp();if(!app)return;const draft=state.catalogDrafts[app.id]??={};if(event.target.id==='catalog-profile-proxy')draft.proxy_url=event.target.value;});
   $('#catalog-detail').addEventListener('change',event=>{const app=catalogApp();if(!app||event.target.id!=='catalog-profile-mode')return;const draft=state.catalogDrafts[app.id]??={};draft.mode=event.target.value;$('#catalog-profile-proxy-field').hidden=draft.mode==='clear_environment';const mode=(app.launch_profile?.modes||[]).find(item=>item.id===draft.mode);$('#catalog-profile-mode-notice').textContent=mode?.notice||'仅影响新启动的进程，软件仍可能使用自己的代理设置。';});
   $('#catalog-profile-download').addEventListener('click',()=>{if(!state.profileResult)return;download(state.profileResult.filename||'flowdesk-launch.ps1',state.profileResult.content,state.profileResult.mime||'text/plain;charset=utf-8');toast('脚本已下载；本次没有执行或重启软件。');});
+  document.addEventListener('flowdesk:add-app',()=>showCatalogAdd());
+  switchWorkspace('guide');
   init();
 })();

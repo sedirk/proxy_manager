@@ -15,7 +15,7 @@ from proxyworkbench.runtime import asset_root, data_root
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description='流向 · 本机代理接线台')
+    parser = argparse.ArgumentParser(description='流向 · 本机代理工作台')
     parser.add_argument('--port', type=int, default=None, help='默认复用上次本机端口；0 表示随机端口')
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--no-discovery', action='store_true', help='仅供隔离测试')

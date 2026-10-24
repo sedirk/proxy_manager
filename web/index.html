@@ -6,7 +6,9 @@
   <meta name="color-scheme" content="dark">
   <title>流向 · 本机代理工作台</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="guide.css">
   <script src="app.js" defer></script>
+  <script src="guide.js" defer></script>
 </head>
 <body>
   <svg class="icon-definitions" aria-hidden="true"><defs>
@@ -37,9 +39,17 @@
       <div class="header-actions"><span id="service-status" class="service-status"><i></i>连接本机服务…</span><button id="discover-button" class="button button-quiet"><svg><use href="#i-scan"/></svg>自动检测</button><button id="shutdown-button" class="text-button" title="关闭网页不会退出后台。退出服务会先恢复本工具系统接入并停止中继。">退出后台</button><button id="help-button" class="icon-button" aria-label="使用与能力边界"><svg><use href="#i-info"/></svg></button></div>
     </header>
 
-    <nav class="workspace-tabs" aria-label="工作区视图" role="tablist"><button id="workspace-catalog-tab" role="tab" aria-selected="true" aria-controls="catalog-workspace" data-workspace="catalog"><svg><use href="#i-search"/></svg>应用与设置</button><button id="workspace-routing-tab" role="tab" aria-selected="false" aria-controls="routing-workspace" data-workspace="routing"><svg><use href="#i-flow"/></svg>路由设计</button><span>先看软件的设置与连接，再选择接入方式</span></nav>
+    <nav class="workspace-tabs" aria-label="工作区视图" role="tablist"><button id="workspace-guide-tab" role="tab" aria-selected="true" aria-controls="guide-workspace" data-workspace="guide"><svg><use href="#i-scan"/></svg>解决连接问题</button><button id="workspace-catalog-tab" role="tab" aria-selected="false" aria-controls="catalog-workspace" data-workspace="catalog"><svg><use href="#i-search"/></svg>应用与设置</button><button id="workspace-routing-tab" role="tab" aria-selected="false" aria-controls="routing-workspace" data-workspace="routing"><svg><use href="#i-flow"/></svg>路由设计</button><span>识别本机网络工具，按检测建议处理</span></nav>
 
-    <section id="catalog-workspace" class="catalog-workspace" role="tabpanel" aria-labelledby="workspace-catalog-tab">
+    <section id="guide-workspace" class="guide-workspace" role="tabpanel" aria-labelledby="workspace-guide-tab">
+      <div class="guide-heading"><div><p class="eyebrow">一步步找到可用的连接方式</p><h1>哪个软件连不上？</h1><p>选软件、粘贴报错或失败地址，工作台帮你比较连接方式，再给出下一步。</p></div><button id="guide-rescan" class="button button-outline">重新识别网络工具</button></div>
+      <section class="guide-tools-section" aria-label="已识别的代理与网络工具"><div class="guide-section-heading"><h2>本机代理与网络工具</h2><span id="guide-observed">正在读取识别结果…</span></div><div id="guide-tools" class="guide-tools"></div></section>
+      <ol class="guide-steps" aria-label="解决问题的步骤"><li id="guide-step-1" aria-current="step"><b>1</b>说明问题</li><li id="guide-step-2"><b>2</b>比较连接</li><li id="guide-step-3"><b>3</b>按建议处理并确认</li></ol>
+      <div class="guide-flow"><form id="guide-form" class="guide-card"><h2>先告诉我哪里失败了</h2><label class="field"><span>遇到问题的软件</span><select id="guide-app" required><option value="">选择软件…</option></select></label><button id="guide-add-app" type="button" class="text-button">找不到？添加软件</button><label class="field"><span>粘贴错误信息 · 可选</span><textarea id="guide-error-text" rows="3" maxlength="16000" placeholder="例如：GET https://raw.githubusercontent.com/… error sending request"></textarea></label><label class="field"><span>失败的地址</span><input id="guide-url" type="url" placeholder="https://…" autocomplete="off" spellcheck="false" required></label><p class="guide-hint">粘贴报错时会尝试提取地址。请去除密码、令牌和查询参数。</p><button id="guide-check" type="submit" class="button button-primary">检测并给出建议</button><p id="guide-progress" class="guide-hint" role="status" aria-live="polite">点击后比较普通连接与已识别的代理入口。</p><p id="guide-error" class="notice danger" role="alert" hidden></p></form>
+      <section id="guide-result" class="guide-card guide-result" aria-label="检测建议" aria-live="polite"><div class="guide-placeholder"><svg><use href="#i-flow"/></svg><h2>从具体问题开始</h2><p>例如 Hermes 安装脚本下载失败：填写报错地址后，比较普通连接与 v2rayN 的代理入口；有可用方式时直接准备该软件的启动方案。</p><p>UU、aTrust 和 ZeroTier 会作为加速或隧道线索展示，其私有端口不会被当作通用代理。</p></div></section></div>
+    </section>
+
+    <section id="catalog-workspace" class="catalog-workspace" role="tabpanel" aria-labelledby="workspace-catalog-tab" hidden>
       <div class="catalog-heading"><div><div class="eyebrow">APPLICATIONS & SETTINGS</div><h1>软件的代理，在哪里生效</h1><p id="catalog-evidence-summary">查看设置来源、连接线索和日志，找到下一步可用操作。</p></div><button id="catalog-refresh-button" class="button button-outline"><svg><use href="#i-scan"/></svg>刷新应用清单</button></div>
       <div id="catalog-layers" class="catalog-layers" aria-label="Windows 代理设置总览"></div>
       <div class="catalog-columns"><section class="catalog-list-panel" aria-label="本机软件清单"><div class="catalog-list-heading"><h2>本机软件 <span id="catalog-app-count">等待检测</span><button id="catalog-add-button" class="button button-outline catalog-add-button"><svg><use href="#i-plus"/></svg>添加软件</button></h2><label class="search-box"><svg><use href="#i-search"/></svg><input id="catalog-search" type="search" placeholder="搜索名称、进程或设置来源" aria-label="搜索本机软件"></label><label class="catalog-filter"><input id="catalog-running-only" type="checkbox">只看正在运行</label></div><div id="catalog-app-list" class="catalog-app-list" aria-live="polite"></div></section><section id="catalog-detail" class="catalog-detail" aria-label="所选软件的设置与日志"></section></div>

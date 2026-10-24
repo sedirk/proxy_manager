@@ -23,12 +23,14 @@ from .privacy import redact
 
 _PROTECTED = {'codex', 'v2rayn', 'xray', 'v2ray', 'sing_box', 'clash', 'mihomo',
               'clash_verge', 'mihomo_party', 'ssr', 'surge', 'nekobox', 'hiddify',
-              'proxifier', 'proxycap', 'uu', 'flowdesk'}
+              'proxifier', 'proxycap', 'uu', 'atrust', 'zerotier', 'flowdesk'}
 _PROTECTED_EXES = {'codex.exe', 'codex-app-server.exe', 'app-server.exe',
                    'v2rayn.exe', 'xray.exe', 'v2ray.exe', 'sing-box.exe',
                    'singbox.exe', 'mihomo.exe', 'clash.exe', 'clash-verge.exe',
                    'verge-mihomo.exe', 'uu.exe', 'uu_neths_helper.exe',
-                   'proxifier.exe', 'proxycap.exe', 'flowdesk.exe'}
+                   'proxifier.exe', 'proxycap.exe', 'flowdesk.exe', 'atrust.exe', 'atrustagent.exe',
+                   'atrustxtunnel.exe', 'atrusttray.exe', 'zerotier-one_x64.exe', 'zerotier-one_x86.exe',
+                   'zerotier-one.exe', 'zerotier_desktop_ui.exe', 'uu_launcher.exe', 'uu_cloudsyn.exe'}
 _CLI_EXES = {'curl.exe', 'git.exe', 'python.exe', 'pythonw.exe', 'python3.exe',
              'pip.exe', 'pip3.exe', 'node.exe', 'npm.exe'}
 _MAIN_EXES = {
@@ -457,7 +459,7 @@ class Catalog:
                 else:
                     executable, resource_base, helpers_only = selected, Path(selected).parent, False
             protected = (app_id in _PROTECTED or capability_id in _PROTECTED
-                         or original.get('category') in ('proxy', 'accelerator')
+                         or original.get('category') in ('proxy', 'accelerator', 'tunnel')
                          or any(Path(str(entry.get('executable') or entry.get('name') or '')).name.casefold() in _PROTECTED_EXES for entry in processes)
                          or bool(manual and Path(manual['executable']).name.casefold() in _PROTECTED_EXES))
             available = bool(executable and not protected)

@@ -31,6 +31,7 @@ let routePlan, calls, notices, renderCount, resolver;
 const state = {};
 const context = {
   state, location: {protocol: 'http:'},
+  document: {dispatchEvent: () => {}}, CustomEvent: class {constructor(name, options) {this.type=name;this.detail=options?.detail;}},
   $: node,
   $$: (selector) => selector === 'button,input' ? controls.map(node) : selector === '[data-catalog-remove]' ? [node('#remove')] : [],
   h: (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;'),

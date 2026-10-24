@@ -65,6 +65,15 @@ class CatalogApiTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertFalse(self.server.service.relay.status()['running'])
 
+    def test_guidance_and_launch_endpoints_require_session_before_any_operation(self):
+        self.assertEqual(self.request('/api/troubleshoot', auth=False)[0], 403)
+        for action in ('check', 'profile', 'launch', 'feedback'):
+            self.assertEqual(self.request('/api/troubleshoot/' + action, 'POST', {}, auth=False)[0], 403)
+        status, value = self.request('/api/troubleshoot')
+        self.assertEqual(status, 200)
+        self.assertIn('catalog', value)
+        self.assertIn('tools', value)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -235,7 +235,7 @@ def main():
             assert catalog['schema_version'] == 1 and isinstance(catalog['apps'], list)
             assert any(app['id'] == 'flowdesk' and app['protected'] for app in catalog['apps'])
             report['application_catalog_api'] = True
-            for name in ('index.html', 'app.js', 'styles.css'):
+            for name in ('index.html', 'app.js', 'guide.js', 'styles.css', 'guide.css'):
                 with opener.open(url + '/' + name) as response:
                     assert response.read() == (ROOT / 'web' / name).read_bytes()
             report['bundled_web_assets'] = True
@@ -274,6 +274,15 @@ def main():
             report['persistent_state_survives_restart'] = True
             persisted = api('/api/catalog')
             assert any(app.get('manual_id') == manual_id for app in persisted['apps'])
+            guided = api('/api/troubleshoot')
+            assert isinstance(guided['tools'], list) and isinstance(guided['catalog']['apps'], list)
+            guided_check = api('/api/troubleshoot/check', {'app_id': added['app_id'],
+                                'url': 'http://127.0.0.1:' + str(origin.server_port) + '/'})
+            assert guided_check['recommendation']['status'] == 'target_reachable'
+            assert guided_check['recommendation']['profile'] is None
+            assert not api('/api/state')['runtime']['running']
+            report['guided_diagnosis'] = {'api': True, 'real_loopback_target': True,
+                                         'direct_success_needs_no_proxy_change': True, 'target_application_not_launched': True}
             api('/api/discover', {})
             observed = api('/api/state')['snapshot']
             assert observed['platform'] == 'windows'

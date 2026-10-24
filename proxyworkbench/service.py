@@ -5,6 +5,8 @@ import copy
 import json
 from pathlib import Path
 import threading
+import time
+import secrets
 import uuid
 from urllib.parse import urlsplit
 
@@ -92,6 +94,8 @@ class Service:
         self.closing = False
         self.audit_error = None
         self._catalog_cache = None
+        self.guide_slots = threading.BoundedSemaphore(1)
+        self.guide_checks = {}
         self.custom_apps_error = None
         from .catalog import manual_apps_document
         try:
@@ -255,6 +259,92 @@ class Service:
                 arguments=value.get('arguments'))
             self.audit('导出新进程启动配置（未执行）', {'app_id': value.get('app_id'), 'mode': value.get('mode')})
             return result
+
+    def guide_state(self):
+        with self.lock:
+            return {'catalog': self.catalog_state(), 'tools': copy.deepcopy(self.snapshot.get('network_tools', [])),
+                    'snapshot_captured_at': self.snapshot.get('captured_at'), 'snapshot_stale': self.snapshot_stale,
+                    'discovering': self.discovering, 'discovery_error': self.discovery_error}
+
+    def guide_check(self, value):
+        from .troubleshoot import diagnose, problem_url
+        problem_url(value)  # Reject private/invalid URLs before any collection or probe.
+        if not self.guide_slots.acquire(blocking=False):
+            raise RuntimeError('已有一项问题检测正在进行，请等待结果')
+        try:
+            with self.lock:
+                if not any(app['id'] == value.get('app_id') for app in self._catalog().describe()['apps']):
+                    raise ValueError('请先选择遇到问题的软件，找不到时可添加程序')
+            scan = self.discover()
+            if scan.get('discovering') or scan.get('error'):
+                raise RuntimeError('本机识别还未完成，请稍后重新检测')
+            with self.lock:
+                snapshot = copy.deepcopy(self.snapshot)
+                app = next((app for app in self._catalog().describe()['apps'] if app['id'] == value.get('app_id')), None)
+                if app is None:
+                    raise ValueError('该进程已退出，请把主程序添加到本机软件后重试')
+            def runner(url, target, **kwargs):
+                with self.probe_slots:
+                    return probes.probe(url, target, forbidden_ports=(self.control_port,), **kwargs)
+            result = diagnose(snapshot, app, value, runner)
+            check_id = secrets.token_hex(16)
+            with self.lock:
+                self.guide_checks = {key: entry for key, entry in self.guide_checks.items() if time.monotonic() - entry['at'] < 600}
+                while len(self.guide_checks) >= 8:
+                    self.guide_checks.pop(next(iter(self.guide_checks)))
+                self.guide_checks[check_id] = {'at': time.monotonic(), 'result': copy.deepcopy(result),
+                                             'executable': app.get('executable') or app.get('launch_profile', {}).get('executable')}
+                self.audit('引导式连接对照检测', {'app_id': app['id'], 'result': result['recommendation']['status']})
+            return {**result, 'check_id': check_id}
+        finally:
+            self.guide_slots.release()
+
+    def _guide_checked(self, value):
+        entry = self.guide_checks.get(value.get('check_id'))
+        if not entry or time.monotonic() - entry['at'] >= 600:
+            raise ValueError('本次检测已过期，请重新检测后操作')
+        return entry
+
+    def guide_profile(self, value):
+        with self.lock:
+            entry = self._guide_checked(value)
+            result = entry['result']
+            profile = result['recommendation']['profile']
+            if not profile:
+                raise ValueError('本次没有适合该软件的代理启动方案，请按检测建议操作')
+            app = self._catalog()._apps.get(result['app_id'])
+            if not app or app.get('executable') != entry['executable']:
+                raise ValueError('程序记录已经变化，请重新检测')
+            available = [option['proxy_url'] for tool in self.snapshot.get('network_tools', []) for option in tool.get('proxy_options', [])]
+            if profile['proxy_url'] not in available:
+                raise ValueError('代理入口已经变化，请重新识别与检测')
+            exported = self.catalog_launch_profile({'app_id': result['app_id'], **profile})
+            return {**exported, 'app_name': result['app_name'], 'proxy_url': profile['proxy_url'],
+                    'steps': ['核对上方的软件名称与代理入口。', '关闭当前目标软件窗口，保留代理客户端运行。',
+                              '点击“按方案启动”，在软件里重试原来的操作。', '回到此页确认结果；出现新错误时粘贴新地址再检测。']}
+
+    def guide_feedback(self, value):
+        with self.lock:
+            entry = self._guide_checked(value)
+            if value.get('outcome') not in {'resolved', 'failed'}:
+                raise ValueError('请选择实际操作成功或仍然失败')
+            self.audit('用户反馈引导操作结果', {'app_id': entry['result']['app_id'], 'outcome': value['outcome'], 'source': 'user_report'})
+            return {'outcome': value['outcome'], 'source': 'user_report',
+                    'message': '已记录你确认本次操作成功。' if value['outcome'] == 'resolved' else '请粘贴新的错误地址再检测；后续安装阶段可能访问不同目标。'}
+
+    def guide_launch(self, value):
+        from .app_launch import launch
+        with self.lock:
+            self.guide_profile(value)  # Same app protection, expiry and entrance validation as export.
+            entry = self._guide_checked(value)
+            app = self._catalog()._apps[entry['result']['app_id']]
+            if app['protected']:
+                raise ValueError('该工作连接受保护，请在软件自己的设置中操作')
+            executable = app['launch_profile']['executable']
+            proxy_url = entry['result']['recommendation']['profile']['proxy_url']
+        result = launch(executable, proxy_url)
+        self.audit('用户按检测方案启动目标新进程', {'app_id': entry['result']['app_id'], 'pid': result['pid'], 'proxy_url': proxy_url})
+        return result
 
     def preview(self, value):
         plan = design_plan(value)

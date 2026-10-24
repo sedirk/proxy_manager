@@ -38,7 +38,9 @@ _APP_SPECS = {
     "nekobox": ("NekoBox / Nekoray", {"nekobox.exe", "nekoray.exe"}, ("nekobox", "nekoray")),
     "hiddify": ("Hiddify", {"hiddify.exe"}, ("hiddify",)),
     "proxifier": ("Proxifier", {"proxifier.exe"}, ("proxifier",)),
-    "uu": ("网易 UU 加速器", {"uu.exe", "uu_ball.exe", "uu_neths_helper.exe", "uuhelper.exe", "uubooster.exe"}, ("网易uu", "网易 uu", "netease uu", "uu加速器", "uu 加速器")),
+    "uu": ("网易 UU 加速器", {"uu.exe", "uu_ball.exe", "uu_neths_helper.exe", "uuhelper.exe", "uubooster.exe", "uu_launcher.exe", "uu_cloudsyn.exe"}, ("网易uu", "网易 uu", "netease uu", "uu加速器", "uu 加速器")),
+    "atrust": ("深信服 aTrust", {"atrust.exe", "atrustagent.exe", "atrustxtunnel.exe", "atrusttray.exe"}, ("atrust", "深信服零信任")),
+    "zerotier": ("ZeroTier", {"zerotier-one_x64.exe", "zerotier-one_x86.exe", "zerotier-one.exe", "zerotier_desktop_ui.exe"}, ("zerotier",)),
     "codex": ("Codex", {"codex.exe", "codex-app-server.exe", "app-server.exe"}, ("openai codex", "codex")),
     "steam": ("Steam", {"steam.exe", "steamwebhelper.exe", "steamservice.exe"}, ("steam",)),
     "wgc": ("Wargaming Game Center", {"wgc.exe", "wgc_renderer_host.exe"}, ("wargaming.net game center", "wargaming game center")),
@@ -53,6 +55,7 @@ _APP_SPECS = {
     "vscode": ("Visual Studio Code", {"code.exe"}, ("visual studio code",)),
 }
 _ACCELERATOR_APPS = {"uu"}
+_TUNNEL_APPS = {"atrust", "zerotier"}
 _PROXY_APPS = {"v2rayn", "xray", "v2ray", "sing_box", "clash", "mihomo", "clash_verge", "mihomo_party", "ssr", "surge", "nekobox", "hiddify", "proxifier"}
 _CORE_NAMES = {"xray.exe", "v2ray.exe", "sing-box.exe", "singbox.exe", "clash.exe", "clash-meta.exe", "clash-win64.exe", "clash-windows-amd64.exe", "mihomo.exe", "verge-mihomo.exe", "sslocal.exe"}
 
@@ -206,6 +209,7 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $taskResult = @{ errors = @{} }
 try { $taskResult.processes = @(Get-CimInstance Win32_Process -Property Name,ProcessId,ParentProcessId,ExecutablePath | Select-Object Name,ProcessId,ParentProcessId,ExecutablePath) } catch { $taskResult.errors.processes = $_.Exception.Message }
+try { $taskResult.services = @(Get-CimInstance Win32_Service -Filter "Name LIKE '%aTrust%' OR Name LIKE '%ZeroTier%' OR Name LIKE '%Clash%' OR Name LIKE '%Mihomo%' OR Name LIKE '%v2ray%'" -Property Name,DisplayName,State,ProcessId | Select-Object Name,DisplayName,State,ProcessId) } catch { $taskResult.errors.services = $_.Exception.Message }
 try { $taskResult.core_commands = @(Get-CimInstance Win32_Process -Filter "CORE_FILTER" -Property Name,ProcessId,ExecutablePath,CommandLine | Select-Object Name,ProcessId,ExecutablePath,CommandLine) } catch { $taskResult.errors.core_commands = $_.Exception.Message }
 try { $taskResult.tcp_listeners = @(Get-NetTCPConnection -State Listen | Select-Object LocalAddress,LocalPort,OwningProcess) } catch { $taskResult.errors.tcp_listeners = $_.Exception.Message }
 try { $taskResult.udp_listeners = @(Get-NetUDPEndpoint | Select-Object LocalAddress,LocalPort,OwningProcess) } catch { $taskResult.errors.udp_listeners = $_.Exception.Message }
@@ -553,7 +557,7 @@ def _interfaces(raw):
         values = [values] if isinstance(values, str) else values
         obtain(item)["dns"].extend({"address": _safe_text(value, 140), "family": _family(item.get("AddressFamily"))} for value in values)
     for item in interfaces.values():
-        item["virtual_hint"] = bool(re.search(r"tun|tap|wintun|xray|sing.box|clash|mihomo|zerotier|tailscale|vpn", item["name"] + " " + item["description"], re.I))
+        item["virtual_hint"] = bool(re.search(r"tun|tap|wintun|xray|sing.box|clash|mihomo|zerotier|tailscale|vpn|atrust", item["name"] + " " + item["description"], re.I))
         item["virtual_hint_basis"] = "interface_name_or_description_only"
         item["addresses"].sort(key=lambda value: (value["family"], value["address"]))
         item["dns"].sort(key=lambda value: (value["family"], value["address"]))
@@ -608,7 +612,7 @@ def _endpoints(raw, configs, process_by_pid):
             identity = json.dumps([transport, address, port, pid], separators=(",", ":"))
             result.append({"id": "ep-" + hashlib.sha256(identity.encode()).hexdigest()[:16], "transport": transport,
                            "address": address, "port": port, "pid": pid, "owner": _safe_text(owner.get("Name"), 100) or None,
-                           "app_id": app, "role": "accelerator_listener" if app in _ACCELERATOR_APPS else "proxy_candidate" if app in _PROXY_APPS or declarations else ("application_listener" if app else "unclassified_listener"),
+                           "app_id": app, "role": "accelerator_listener" if app in _ACCELERATOR_APPS else "tunnel_listener" if app in _TUNNEL_APPS else "proxy_candidate" if app in _PROXY_APPS or declarations else ("application_listener" if app else "unclassified_listener"),
                            "evidence_status": "observed", "observed_listener": True,
                            "declared_protocol": protocols[0] if len(protocols) == 1 else None,
                            "protocol_declarations": declarations, "protocol_evidence": "configuration_reference" if declarations else "unknown",
@@ -620,7 +624,7 @@ def _apps(raw, endpoints, process_by_pid):
     found, process_app = {}, {}
     def obtain(key):
         title = "360 Wargaming Game Center" if key == "wgc_cn360" else _APP_SPECS[key][0]
-        return found.setdefault(key, {"id": key, "name": title, "category": "accelerator" if key in _ACCELERATOR_APPS else "proxy" if key in _PROXY_APPS else "application",
+        return found.setdefault(key, {"id": key, "name": title, "category": "accelerator" if key in _ACCELERATOR_APPS else "tunnel" if key in _TUNNEL_APPS else "proxy" if key in _PROXY_APPS else "application",
                                       "running_processes": [], "installed_locations": [], "observed_connections": {"tcp_count": 0, "to_proxy_endpoints": []},
                                       "effective_proxy": "unknown", "evidence_status": "observed"})
     for pid, process in process_by_pid.items():
@@ -784,6 +788,8 @@ def snapshot(*, timeout=15.0) -> dict:
     process_by_pid = {_integer(item.get("ProcessId")): item for item in _rows(raw.get("processes")) if _integer(item.get("ProcessId")) is not None}
     endpoints = _endpoints(raw, configs, process_by_pid)
     apps = _apps(raw, endpoints, process_by_pid)
+    from .network_tools import inventory
+    network_tools = inventory(apps, endpoints, interfaces, wininet, _rows(raw.get('services')))
     layers = {"wininet": wininet, "winhttp": winhttp, "environment": _environment(raw), "core_configs": configs,
               "hosts": _hosts_state() if supported else _section("unsupported", "Windows hosts file", content_exported=False), "default_routes": routes}
     accelerator_apps = [app for app in apps if app["id"] in _ACCELERATOR_APPS]
@@ -797,12 +803,13 @@ def snapshot(*, timeout=15.0) -> dict:
         proxy_disable_setting="unknown", hosts_conflict_setting="unknown", driver_redirection="unknown", game_session_verified=False,
         limitations="只读观察；没有读取或改动 UU 开关、驱动/WFP 规则、加速节点与游戏会话，不把私有端口当通用代理。")
     sections = {}
-    for key in ("processes", "core_commands", "tcp_listeners", "udp_listeners", "connections", "adapters", "ip_interfaces", "addresses", "dns", "routes"):
+    for key in ("processes", "services", "core_commands", "tcp_listeners", "udp_listeners", "connections", "adapters", "ip_interfaces", "addresses", "dns", "routes"):
         sections[key] = {"status": "observed" if key in raw else unavailable,
                          "error": errors.get(key) or errors.get("powershell") if key not in raw else None}
     return {"schema_version": SCHEMA_VERSION, "captured_at": _now(), "platform": "windows" if supported else sys.platform,
             "evidence_status": "observed", "layers": layers, "endpoints": endpoints, "apps": apps, "interfaces": interfaces,
             "network_processes": _network_processes(raw, endpoints, process_by_pid),
+            "network_tools": network_tools,
             "findings": _findings(layers, interfaces, apps, endpoints, errors),
             "capabilities": {"read_only": True, "active_probes": False, "protocol_verification": False,
                              "other_process_environment_read": False, "remote_node_details_exported": False,
