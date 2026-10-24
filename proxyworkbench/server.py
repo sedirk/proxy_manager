@@ -16,11 +16,11 @@ class ControlServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = False
 
-    def __init__(self, address, root, *, discover=True, service=None):
+    def __init__(self, address, root, *, discover=True, service=None, assets=None):
         if address[0] != '127.0.0.1':
             raise ValueError('Control API must bind only to 127.0.0.1')
         super().__init__(address, Handler)
-        self.root = Path(root)
+        self.root = Path(assets if assets is not None else root)
         self.token = secrets.token_urlsafe(32)
         self.instance_id = secrets.token_hex(16)
         self.service = service or Service(root, self.server_port, discover=discover)

@@ -4,6 +4,9 @@ __pycache__/
 
 # Generated packages, screenshots and machine-specific diagnostics stay local.
 /artifacts/
+/.build-venv/
+/build/
+/dist/
 
 # Original conversations and handoff archives are private source material.
 /question_example/*

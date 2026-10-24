@@ -11,17 +11,24 @@ import webbrowser
 
 from proxyworkbench.server import ControlServer
 from proxyworkbench.system_proxy import atomic_json
+from proxyworkbench.runtime import asset_root, data_root
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description='流向 · 本机代理接线台')
     parser.add_argument('--port', type=int, default=None, help='默认复用上次本机端口；0 表示随机端口')
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--no-discovery', action='store_true', help='仅供隔离测试')
-    args = parser.parse_args()
-    root = Path(__file__).resolve().parent
+    parser.add_argument('--data-root', help='自定义持久数据根目录；数据保存在其 .local 子目录')
+    parser.add_argument('--guardian', nargs=2, metavar=('JOURNAL', 'LEASE_ID'), help=argparse.SUPPRESS)
+    args = parser.parse_args(argv)
+    if args.guardian:
+        from proxyworkbench.guardian import watch
+        watch(*args.guardian)
+        return
+    root = data_root(args.data_root)
     local = root / '.local'
-    local.mkdir(exist_ok=True)
+    local.mkdir(parents=True, exist_ok=True)
     # OS byte lock closes with the process, unlike a stale PID file.
     handle = (local / 'instance.lock').open('a+b')
     if handle.tell() == 0:
@@ -61,12 +68,12 @@ def main():
         except (OSError, ValueError, KeyError):
             selected_port = 18743
     try:
-        server = ControlServer(('127.0.0.1', selected_port), root, discover=not args.no_discovery)
+        server = ControlServer(('127.0.0.1', selected_port), root, discover=not args.no_discovery, assets=asset_root())
     except OSError:
         if args.port is not None:
             raise
         # Another program owns the old port; never stop it or bind on the LAN.
-        server = ControlServer(('127.0.0.1', 0), root, discover=not args.no_discovery)
+        server = ControlServer(('127.0.0.1', 0), root, discover=not args.no_discovery, assets=asset_root())
     atomic_json(local / 'server.json', {'pid': os.getpid(), 'port': server.server_port, 'instance_id': server.instance_id})
     url = f'http://127.0.0.1:{server.server_port}'
     if sys.stdout:

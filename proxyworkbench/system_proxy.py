@@ -18,6 +18,8 @@ import sys
 import threading
 import time
 
+from .runtime import frozen, guardian_launch
+
 _ACTIVE_PHASES = {'armed', 'trial', 'confirmed', 'restore_failed'}
 _THREAD_LOCKS = {}
 _THREAD_LOCKS_LOCK = threading.Lock()
@@ -340,11 +342,12 @@ class SystemLease:
             try:
                 if self.start_guardian:
                     ready = self.directory / (identifier + '.ready')
-                    self.guardian = subprocess.Popen([sys.executable, '-m', 'proxyworkbench.guardian', str(self.journal_path), identifier],
-                        cwd=str(Path(__file__).resolve().parent.parent), stdin=subprocess.DEVNULL,
+                    command, directory, environment = guardian_launch(self.journal_path, identifier)
+                    self.guardian = subprocess.Popen(command,
+                        cwd=directory, env=environment, stdin=subprocess.DEVNULL,
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                         creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-                    limit = time.monotonic() + 5
+                    limit = time.monotonic() + (20 if frozen() else 5)
                     while not ready.exists() and self.guardian.poll() is None and time.monotonic() < limit:
                         time.sleep(.05)
                     if not ready.exists() or self.guardian.poll() is not None:
