@@ -26,6 +26,7 @@
     {id:'rustdesk',name:'RustDesk 待验证',app_id:'rustdesk',default_target:'direct',rules:[]}
   ],dns_overrides:{},layout:{nodes:{},viewport:{x:0,y:0,zoom:1}}});
   const state = {plan:initialPlan(),snapshot:null,runtime:{running:false,channels:[]},system:{},history:[],events:[],activity:[],eventKeys:new Set(),selected:{kind:'channel',id:'steam'},dirty:false,connected:false,token:null,busy:false,preview:null,previewSignature:null,systemPreview:null,pending:null,undo:[],worldNodes:[],view:{x:30,y:40,zoom:.8},runtimeSignature:null,discovering:false,eventCursor:0,compact:innerWidth<=1000,focusMode:true,serverPlan:null,recoveredDraft:false,probeLayers:[],probeScope:''};
+  Object.assign(state,{workspace:'catalog',catalog:null,catalogLoading:false,catalogSignature:null,catalogSelected:null,catalogDrafts:{},profileResult:null,catalogMutationBusy:false,catalogRevision:0});
   const category = appId => /codex|app-server/i.test(appId || '') ? 'codex' : /wows|warships|wgc/i.test(appId || '') ? 'wows' : /steam/i.test(appId || '') ? 'steam' : /rustdesk/i.test(appId || '') ? 'rustdesk' : /^(uu|netease_uu)$/i.test(appId || '') ? 'uu' : 'browser';
   const channel = id => state.plan.channels.find(c => c.id === id);
   const target = id => state.plan.targets.find(t => t.id === id);
@@ -63,7 +64,7 @@
   }
   async function task(button, work) { if (state.busy) return; state.busy = true; button?.classList.add('loading'); try {return await work();} catch (error) {toast(error.message,true); activity(error.message,'需处理');} finally {state.busy = false;button?.classList.remove('loading');renderHeader();} }
   function ingest(data, usePlan = false) { const oldSnapshot=state.snapshot?.captured_at,oldRuntime=JSON.stringify(state.runtime.channels||[]);if ('snapshot' in data) state.snapshot = data.snapshot&&(data.snapshot.captured_at||Object.keys(data.snapshot.layers||{}).length)?data.snapshot:null; if (data.runtime) state.runtime = data.runtime; if ('system' in data) state.system = data.system || {}; if (Array.isArray(data.history)) state.history = data.history; if('discovering' in data)state.discovering = Boolean(data.discovering); if(data.plan)state.serverPlan=normalizePlan(data.plan);if(data.running_plan&&state.runtime.running){const running=normalizePlan(data.running_plan);state.runtimeSignature=JSON.stringify({targets:running.targets,channels:running.channels,dns_overrides:running.dns_overrides});}if (usePlan && data.plan) {state.plan = normalizePlan(data.plan);state.dirty = false;}renderHeader();renderLibrary();renderActivity();renderEvidence();renderRuntime();const changed=oldSnapshot!==state.snapshot?.captured_at||oldRuntime!==JSON.stringify(state.runtime.channels||[]);if(usePlan||changed){if(!pointer)renderGraph();if(!document.activeElement?.closest('#inspector-content'))renderInspector();} }
-  async function refresh(usePlan = false) { const data = await api('/api/state'); state.connected = true; ingest(data,usePlan); return data; }
+  async function refresh(usePlan = false) { const data = await api('/api/state'); state.connected = true; state.snapshotStale=Boolean(data.snapshot_stale);state.discoveryError=data.discovery_error;ingest(data,usePlan); refreshCatalog(); return data; }
 
   function renderHeader() {
     $('#plan-title').textContent = state.plan.name; $('#save-status').textContent = state.recoveredDraft ? '已恢复未保存草稿' : state.dirty ? '草稿未保存' : state.connected ? '方案已保存' : '离线设计方案'; $('#save-status').classList.toggle('saved',state.connected && !state.dirty);
@@ -74,7 +75,7 @@
     $('#level-relay').textContent = state.runtime.running ? '中继端口已监听' : '中继未启动'; $('#level-relay').classList.toggle('active',Boolean(state.runtime.running));
     const appVerified = state.runtime.application_verified === true; $('#level-app').textContent = appVerified ? '真实应用有验证记录' : '真实应用未验证'; $('#level-app').classList.toggle('active',appVerified);
     $('#workspace-status').innerHTML = `<i></i>${state.runtime.running ? (state.runtimeSignature && state.runtimeSignature === routeSignature() ? '本地中继运行中 · 真实应用请单独验证' : '本地中继运行中 · 画布改动需重新预览应用') : '方案编辑 · 尚未改变系统网络'}`;
-    renderSystem();
+    renderSystem();renderWorkspaceStatus();
   }
   function observedApp(recipe) { return (state.snapshot?.apps || []).find(a => recipe.id==='browser'?/browser|chrome|edge|firefox/i.test(a.id):recipe.id==='wows'?/wows|warships|wgc/i.test(a.id):a.id===recipe.id); }
   function renderLibrary() {
@@ -206,7 +207,121 @@
     let label=labels[phase]||phase;if(trial&&system.deadline){const millis=typeof system.deadline==='number'?system.deadline*1000:Date.parse(system.deadline);if(Number.isFinite(millis))label=`${Math.max(0,Math.ceil((millis-Date.now())/1000))} 秒内确认，否则恢复原设置。`;}
     $('#system-state').textContent=label+(system.reason?' '+system.reason:'');
   }
-  function renderAll() {renderHeader();renderLibrary();renderGraph();renderInspector();renderActivity();renderEvidence();renderRuntime();}
+  function renderAll() {renderHeader();renderLibrary();renderGraph();renderInspector();renderActivity();renderEvidence();renderRuntime();renderCatalog();}
+
+  function switchWorkspace(name) {
+    state.workspace=name==='routing'?'routing':'catalog';$('.workbench').classList.toggle('catalog-active',state.workspace==='catalog');
+    $$('[data-workspace]').forEach(button=>button.setAttribute('aria-selected',String(button.dataset.workspace===state.workspace)));
+    $('#catalog-workspace').hidden=state.workspace!=='catalog';$('#routing-workspace').hidden=state.workspace!=='routing';
+    if(state.workspace==='routing')requestAnimationFrame(()=>{renderGraph();fit();});else{renderCatalog();refreshCatalog();}
+    renderWorkspaceStatus();
+  }
+  function renderWorkspaceStatus(){const observedAt=state.catalog?.snapshot_captured_at||state.snapshot?.captured_at;const date=observedAt?new Date(observedAt):null;$('#catalog-evidence-summary').textContent=!date?'尚未采集连接快照；自动检测后可查看设置、连接和日志线索。':`连接观察：${Number.isNaN(+date)?'时间未记录':date.toLocaleString('zh-CN',{hour12:false})}${state.discovering?' · 正在重新检测':state.snapshotStale||state.catalog?.snapshot_stale?' · 上次快照，尚未完成新检测':''}${state.discoveryError?' · 检测有未完成项，详见分层证据':''}。`;if(state.workspace==='catalog')$('#workspace-status').innerHTML=`<i></i>${state.catalogLoading?'正在读取应用设置线索':state.catalog?'应用与设置 · 观察结果不等于实际出口验证':'应用与设置 · 等待读取本机记录'}`;else $('#workspace-status').innerHTML=`<i></i>${state.runtime.running?(state.runtimeSignature&&state.runtimeSignature===routeSignature()?'本地中继运行中 · 真实应用请单独验证':'本地中继运行中 · 画布改动需重新预览应用'):'方案编辑 · 尚未改变系统网络'}`;}
+  function catalogApps(){return Array.isArray(state.catalog?.apps)?state.catalog.apps:[];}
+  function catalogApp(){return catalogApps().find(app=>app.id===state.catalogSelected);}
+  function catalogValue(value,setting={}){
+    if(typeof value==='string')return value||'未记录';
+    const observed=setting.status==='observed',empty=observed?'未设置':'尚未确认';
+    if(value&&typeof value==='object'&&!Array.isArray(value)){
+      if(setting.layer==='wininet'){
+        const toggle=item=>!observed?'尚未确认':item===true?'已开启':item===false?'已关闭':'尚未确认';
+        return [`手动代理：${toggle(value.enabled)}`,`代理地址：${value.proxy||empty}`,`自动配置脚本（PAC）：${value.pac||empty}`,`自动检测：${toggle(value.auto_detect)}`].join('\n');
+      }
+      if(setting.layer==='winhttp'){
+        const mode=observed?({direct:'默认配置：直连',named_proxy:'默认配置：使用代理',automatic:'默认配置：自动选择代理',default:'默认配置：采用默认代理策略'}[value.mode]||'默认代理状态：尚未确认'):'默认代理状态：尚未确认';
+        return mode+(value.proxy?`\n代理地址：${value.proxy}`:value.mode==='named_proxy'?'\n代理地址：未返回地址':'');
+      }
+      if(String(setting.layer||'').startsWith('environment')){
+        const entries=Object.entries(value).sort(([left],[right])=>left.localeCompare(right));
+        return entries.length?entries.map(([key,item])=>`${key} = ${catalogValue(item)}`).join('\n'):observed?'未设置代理环境变量':'代理环境变量：尚未确认';
+      }
+      return Object.entries(value).map(([key,item])=>`${key}：${catalogValue(item)}`).join('\n')||'未记录';
+    }
+    return value===null||value===undefined?'未记录':Array.isArray(value)?value.map(item=>catalogValue(item)).join('、')||'未记录':typeof value==='boolean'?(value?'是':'否'):String(value);
+  }
+  function catalogSymbol(app){return app.protected?'⌘':/steam/i.test(app.id)?'S':/wgc|wows|warship/i.test(app.id)?'W':/chrome|edge|firefox/i.test(app.id)?'◉':(app.name||'?').slice(0,1).toUpperCase();}
+  function renderCatalogLayers(){
+    const layers=state.snapshot?.layers||{},win=layers.wininet||{},http=layers.winhttp||{},environment=layers.environment||{},interfaces=state.snapshot?.interfaces||[];
+    const variables=['user','machine','process'].reduce((sum,scope)=>sum+Object.keys(environment[scope]?.values||{}).length,0);
+    const tunnel=interfaces.filter(item=>item.is_tunnel||item.tunnel||/tun|wintun|wireguard|sing-box|mihomo|clash/i.test(`${item.name||''} ${item.alias||''} ${item.description||''}`));
+    const cards=[['系统代理',state.snapshot?(win.enabled===true?(win.proxy_server||'启用，入口未返回')+(win.auto_config_url?' · PAC 并存':'')+(win.auto_detect?' · 自动检测':''):win.enabled===false?(win.auto_config_url?'使用 PAC':win.auto_detect?'自动检测已启用':'未启用静态代理'):'启用状态未确认'):'等待检测','使用 WinINet 的应用可参考'],['WinHTTP',http.proxy||({direct:'默认配置：直连',named_proxy:'已配置代理',automatic:'自动代理'}[http.access_type])||'尚未确认','应用会话可另行指定或自动选择代理'],['代理环境变量',state.snapshot?`${variables} 项变量观察记录`:'等待检测','新进程继承，软件支持各异'],['应用私有设置','选择软件查看','每个软件有自己的接入方式'],['TUN / 路由',state.snapshot?(tunnel.length?`${tunnel.length} 个隧道接口线索`:'查看网卡与路由证据'):'等待检测','普通直连仍遵循系统路由'],['日志与连接',state.catalog?`${catalogApps().filter(app=>(app.resources||[]).some(resource=>resource.exists)).length} 个软件有本地位置`:'选择软件定位','已发现与候选位置分开展示']];
+    $('#catalog-layers').innerHTML=cards.map(([title,value,note],index)=>`<div class="catalog-layer"><strong>${h(title)}</strong><span title="${h(value)}">${h(value)}</span><small>${h(note)}</small>${index===0?'<button class="text-button" data-catalog-layer-route>查看系统接入</button>':''}</div>`).join('');
+  }
+  async function refreshCatalog(force=false){
+    if(state.catalogLoading)return;if(!state.connected||location.protocol==='file:'){renderCatalog();return;}
+    const signature=state.snapshot?.captured_at||'not-discovered';if(!force&&signature===state.catalogSignature)return;
+    const requestRevision=state.catalogRevision;
+    state.catalogLoading=true;$('#catalog-refresh-button').disabled=true;renderWorkspaceStatus();
+    try{const result=await api('/api/catalog'),catalog=result.catalog||result;if(requestRevision!==state.catalogRevision)return;if(!Array.isArray(catalog.apps))throw new Error('应用清单格式无效，请更新本机服务。');state.catalog={...catalog,...Object.fromEntries(['snapshot_captured_at','snapshot_stale','discovering','discovery_error'].filter(key=>key in result).map(key=>[key,result[key]]))};state.catalogSignature=signature;
+      if(!catalogApps().some(app=>app.id===state.catalogSelected))state.catalogSelected=catalogApps()[0]?.id||null;
+      renderCatalog();
+    }catch(error){if(requestRevision!==state.catalogRevision)return;$('#catalog-app-list').innerHTML=`<div class="catalog-empty"><h2>应用清单暂不可用</h2>${h(error.message)}<br>自动检测后可再次刷新。</div>`;if(!state.catalog)$('#catalog-detail').innerHTML='<div class="catalog-empty"><h2>先连接本机服务</h2>应用设置和日志只从本机服务读取。已有路由方案仍可在“路由设计”中编辑。</div>';state.catalogSignature=signature;
+    }finally{state.catalogLoading=false;$('#catalog-refresh-button').disabled=!state.connected;renderWorkspaceStatus();}
+  }
+  function renderCatalog(){
+    renderCatalogLayers();const apps=catalogApps(),query=$('#catalog-search').value.trim().toLowerCase(),onlyRunning=$('#catalog-running-only').checked;
+    const filtered=apps.filter(app=>(!onlyRunning||(app.running_processes||[]).length)&&`${app.name} ${app.id} ${(app.running_processes||[]).map(process=>process.name).join(' ')} ${(app.settings||[]).map(setting=>`${setting.layer} ${setting.label} ${setting.source}`).join(' ')}`.toLowerCase().includes(query));
+    if(state.catalog&&!filtered.some(app=>app.id===state.catalogSelected)){state.catalogSelected=filtered[0]?.id||null;$('#catalog-detail').scrollTop=0;}
+    $('#catalog-app-count').textContent=state.catalog?`${filtered.length} / ${apps.length} 项`:state.catalogLoading?'正在读取':'等待检测';$('#catalog-refresh-button').disabled=!state.connected||state.catalogLoading;$('#catalog-add-button').disabled=!state.connected||state.catalogMutationBusy;
+    $('#catalog-app-list').innerHTML=filtered.length?filtered.map(app=>{const running=(app.running_processes||[]).length,summary=app.connection_summary||{};return`<button class="catalog-app ${app.id===state.catalogSelected?'selected':''} ${app.protected?'protected':''}" data-catalog-app="${h(app.id)}" aria-pressed="${app.id===state.catalogSelected}"><span class="catalog-app-symbol">${h(catalogSymbol(app))}</span><span class="catalog-app-copy"><strong>${h(app.name||app.id)}${app.manual?'<span class="catalog-manual-tag">手动</span>':''}</strong><small class="${running?'catalog-running':''}">${running?`${running} 个运行进程`:(app.installed_locations||[]).length?'有安装记录 · 未运行':'没有运行记录'}</small><small class="${summary.status==='proxy_peer_observed'?'observed':''}">${h(summary.label||'实际代理尚未确认')}</small></span>${app.protected?'<svg class="catalog-protected-mark"><use href="#i-lock"/></svg>':''}</button>`;}).join(''):`<div class="catalog-empty">${state.catalog?(query||onlyRunning?'没有符合筛选的软件。':'尚未发现软件记录，请先点“自动检测”。'):state.catalogLoading?'正在读取软件与设置线索…':'自动检测后，将列出本机应用、连接和设置线索。'}</div>`;
+    renderCatalogDetail();renderWorkspaceStatus();
+  }
+  function renderCatalogDetail(){
+    const app=catalogApp();if(!app){$('#catalog-detail').innerHTML='<div class="catalog-empty"><h2>从一个软件开始</h2>选择左侧软件，查看哪些设置会影响它、发现了哪些连接，以及日志在哪里。<br>需要统一分流时，再切换到“路由设计”。</div>';return;}
+    const summary=app.connection_summary||{},profile=app.launch_profile||{},resources=app.resources||[],settings=app.settings||[],processes=app.running_processes||[],modes=Array.isArray(profile.modes)?profile.modes:[];
+    const draft=state.catalogDrafts[app.id]||(state.catalogDrafts[app.id]={mode:modes[0]?.id||'',proxy_url:''});if(!modes.some(mode=>mode.id===draft.mode))draft.mode=modes[0]?.id||'';
+    const mode=modes.find(item=>item.id===draft.mode)||{};const canProfile=profile.available===true&&!app.protected&&modes.length>0;
+    $('#catalog-detail').innerHTML=`<div class="catalog-detail-header"><span class="catalog-app-symbol">${h(catalogSymbol(app))}</span><div><h2>${h(app.name||app.id)}</h2><p>${processes.length?`${processes.length} 个运行进程`:'当前没有运行进程记录'} · ${(app.installed_locations||[]).length} 个安装位置</p></div>${app.protected?`<span class="catalog-protected-tag">${icon('lock')}保留当前连接</span>`:''}</div>
+      ${app.manual&&app.manual_id?`<div class="catalog-manual-registration"><span>已手动登记</span><button class="text-button" data-catalog-remove ${state.catalogMutationBusy?'disabled':''}>移除登记</button><small>只移除清单登记，不卸载软件或删除文件；自动发现的记录仍可保留。</small></div>`:''}
+      <div class="catalog-connection-status ${summary.status==='proxy_peer_observed'?'observed':''}"><strong>${h(summary.label||'实际使用的代理尚未确认')}</strong><p>${h(summary.notice||'设置与连接线索分别记录；没有观察到代理连接，也不能据此判定直连。')}</p></div>
+      <div class="catalog-quick-nav"><button class="text-button" data-catalog-jump="settings">设置来源</button><button class="text-button" data-catalog-jump="profile">启动配置</button><button class="text-button" data-catalog-jump="resources">日志位置</button><button class="text-button" data-catalog-jump="connections">连接证据</button></div><section><h3>可以怎样设置</h3><div class="catalog-capabilities">${(app.capabilities||[]).map(item=>`<span>${h(typeof item==='string'?item:item.label||item.name)}</span>`).join('')||'<span>暂无已确认的专用接入方式</span>'}</div></section>
+      <section class="catalog-section" data-catalog-section="settings"><h3>设置来源</h3><div class="catalog-settings">${settings.map(setting=>`<div class="catalog-setting"><strong>${h(setting.label||setting.layer||'设置')}</strong><div class="catalog-setting-value">${h(catalogValue(setting.value,setting)).replace(/\n/g,'<br>')}</div><div class="catalog-setting-source"><span>${h(setting.status==='observed'?'本机观察':setting.status==='unknown'?'尚未确认':setting.status||'参考方式')}</span> · ${h(setting.source||'来源未记录')}${setting.notice?`<br>${h(setting.notice)}`:''}</div></div>`).join('')||'<p class="catalog-muted">未返回可读取的应用专用设置；请结合软件自身设置和下方连接证据。</p>'}</div></section>
+      <section class="catalog-section" data-catalog-section="profile"><h3>独立启动配置</h3>${canProfile?`<div class="catalog-profile-fields"><label class="field"><span>只影响新启动的进程</span><select id="catalog-profile-mode" aria-label="新进程代理环境模式">${modes.map(item=>`<option value="${h(item.id)}" ${item.id===draft.mode?'selected':''}>${h(item.label||item.id)}</option>`).join('')}</select></label><label class="field" id="catalog-profile-proxy-field" ${draft.mode==='clear_environment'?'hidden':''}><span>代理 URL</span><input id="catalog-profile-proxy" aria-label="新进程代理 URL" value="${h(draft.proxy_url)}" type="text" spellcheck="false" placeholder="http://127.0.0.1:端口"></label><button id="catalog-profile-preview" class="button button-outline">预览启动脚本</button></div><p id="catalog-profile-mode-notice" class="catalog-profile-note">${h(mode.notice||'生成脚本供你审查和手动运行，不改现有进程。')}</p><p class="catalog-muted">${h(profile.executable||'可执行文件未记录')}<br>只设置新进程的代理环境；软件可能继续使用系统或私有设置。已有实例可能复用，需按软件自身方式退出后启动。</p>`:`<p class="catalog-profile-note">${h(app.protected?'该软件保留当前工作连接，本工具不生成重配或重启脚本。':profile.notice||profile.reason||'尚未确认该软件支持代理环境，或没有可用的可执行文件路径。请使用上方专用设置指引。')}</p>`}<button class="text-button" data-catalog-routing>在路由设计中配置专属入口 ${icon('arrow')}</button></section>
+      <section class="catalog-section" data-catalog-section="resources"><h3>日志与配置位置</h3>${resources.length?resources.map(resource=>`<div class="catalog-resource"><div class="catalog-resource-copy"><strong>${h(resource.name||resource.kind||'本地位置')}</strong><small class="${resource.exists?'catalog-resource-exists':''}">${resource.exists?'已发现':'候选位置 · 尚未发现'}${resource.kind?` · ${h(({log:'日志',log_directory:'日志目录',config:'配置',config_directory:'配置目录',directory:'目录'})[resource.kind]||resource.kind)}`:''}</small><small>${h(resource.path||'路径未返回')}</small></div><div class="catalog-resource-actions">${resource.can_tail?`<button class="button button-quiet" data-catalog-resource="${h(resource.id)}" data-resource-action="tail" ${!resource.exists?'disabled':''}>查看脱敏尾日志</button>`:''}<button class="button button-outline" data-catalog-resource="${h(resource.id)}" data-resource-action="open" ${!resource.exists||!resource.can_open?'disabled':''}>打开所在目录</button></div></div>`).join(''):'<p class="catalog-muted">没有已知的安全日志位置。可先让软件产生一次连接，再检查它自身的日志选项。不会递归搜索或读取任意配置。</p>'}</section>
+      <details class="catalog-section" data-catalog-section="connections"><summary>进程与连接证据 · ${Number(summary.tcp_count)||0} 条 TCP 连接</summary>${processes.map(process=>`<p>${h(process.name||'进程')} · PID ${h(process.pid)}<br>${h(process.executable||'可执行文件位置未确认')}</p>`).join('')}${(summary.connections||[]).length?`<table class="catalog-connections"><thead><tr><th>PID</th><th>观察到的远端</th><th>线索</th></tr></thead><tbody>${summary.connections.map(connection=>`<tr><td>${h(connection.pid)}</td><td>${connection.remote_redacted||!connection.remote_address?'非回环 TCP（地址已摘要）':h(connection.remote_address)}${connection.remote_port?':'+h(connection.remote_port):''}</td><td>${(connection.proxy_endpoint_ids||[]).length?'连接到代理候选入口':'仅观察到连接'}</td></tr>`).join('')}</tbody></table>`:'<p>这次快照未返回可展示的连接。关闭连接、权限限制或 UDP 都可能影响观察结果。</p>'}<p>连接到本地代理候选入口只能证明该连接的下一跳；节点出口、TUN、UDP 和整个应用的全部流量仍需相应证据。</p></details>
+      <details class="catalog-section"><summary>能力边界与下一步</summary>${(app.limitations||[]).map(item=>`<p>${h(item)}</p>`).join('')||'<p>尚未验证该应用实际出口；需要结合应用日志与运行记录核对。</p>'}</details>`;
+  }
+  async function catalogResource(button){const app=catalogApp(),resource=(app?.resources||[]).find(item=>item.id===button.dataset.catalogResource),action=button.dataset.resourceAction;if(!app||!resource?.exists||!(action==='tail'?resource.can_tail:resource.can_open))return;await task(button,async()=>{const result=await api('/api/catalog/resource','POST',{app_id:app.id,resource_id:resource.id,action});if(action==='tail'){$('#catalog-log-title').textContent=`${app.name} · ${resource.name||'日志尾部'}`;$('#catalog-log-notice').textContent=result.notice||'显示有界、脱敏的日志尾部，不自动刷新。';$('#catalog-log-content').textContent=result.content??result.text??'没有可显示的日志内容';$('#catalog-log-dialog').showModal();}else{if(result.opened!==true)throw new Error(result.message||'服务未确认目录已打开。');toast('已请求打开该软件已发现的本地目录。');}activity(`${app.name}：${action==='tail'?'读取脱敏日志尾部':'打开已发现目录'}`,'本机观察');});}
+  async function catalogProfile(){const app=catalogApp();if(!app||app.protected||app.launch_profile?.available!==true)return;const draft=state.catalogDrafts[app.id]||{};await task($('#catalog-profile-preview'),async()=>{const result=await api('/api/catalog/launch-profile','POST',{app_id:app.id,mode:draft.mode,proxy_url:draft.proxy_url||''});if(typeof result.content!=='string')throw new Error('服务未返回可审查的启动脚本。');state.profileResult=result;$('#catalog-profile-notice').textContent=[result.notice||'仅生成脚本；本次没有执行脚本或改变现有应用。',...(result.limitations||[])].join(' ');$('#catalog-profile-content').textContent=result.content;$('#catalog-profile-dialog').showModal();activity(`${app.name}：已生成新进程启动脚本，等待审查和手动使用。`,'本机观察');});}
+
+  function catalogMutationBusy(busy,message=''){
+    state.catalogMutationBusy=busy;const dialog=$('#catalog-add-dialog');dialog.setAttribute('aria-busy',String(busy));
+    $$('button,input',dialog).forEach(input=>{input.disabled=busy;});$('#catalog-add-button').disabled=!state.connected||busy;
+    $$('[data-catalog-remove]').forEach(button=>{button.disabled=busy;});if(message)$('#catalog-add-status').textContent=message;
+  }
+  function catalogAddError(message){const error=$('#catalog-add-error');error.textContent=typeof message==='string'?message:message.message||'登记未完成，请检查程序路径。';error.hidden=false;}
+  function catalogUseMutation(result,selected){
+    if(!result.catalog||!Array.isArray(result.catalog.apps))throw new Error('服务未返回更新后的软件清单，请刷新后核对登记结果。');
+    state.catalogRevision++;state.catalog={...(state.catalog||{}),...result.catalog};state.catalogSignature=result.catalog.snapshot_captured_at||null;
+    state.catalogSelected=catalogApps().some(app=>app.id===selected)?selected:catalogApps()[0]?.id||null;state.profileResult=null;
+    renderCatalog();$('#catalog-detail').scrollTop=0;
+  }
+  function showCatalogAdd(){
+    if(state.catalogMutationBusy||!state.connected)return;$('#catalog-add-error').hidden=true;$('#catalog-add-status').textContent='可直接粘贴绝对 .exe 路径，也可以浏览选择。';
+    $('#catalog-add-dialog').showModal();$('#catalog-add-executable').focus();
+  }
+  async function catalogPickExecutable(){
+    if(state.catalogMutationBusy)return;$('#catalog-add-error').hidden=true;catalogMutationBusy(true,'正在打开程序选择窗口，请在窗口中选择或取消…');
+    try{const result=await api('/api/catalog/pick-executable','POST',{});if(result.cancelled===true){$('#catalog-add-status').textContent='已取消选择，填写的路径保持原样。';return;}
+      if(typeof result.executable!=='string'||!result.executable)throw new Error('未返回可用的程序路径。');$('#catalog-add-executable').value=result.executable;$('#catalog-add-status').textContent='已选中程序。点击“添加到清单”后保存登记。';
+    }catch(error){catalogAddError(`${error.message} 可继续手动粘贴程序的绝对路径。`);$('#catalog-add-status').textContent='浏览未完成，填写的内容已保留。';}
+    finally{catalogMutationBusy(false);}
+  }
+  async function catalogAddSubmit(event){
+    event.preventDefault();if(state.catalogMutationBusy)return;const path=$('#catalog-add-executable').value.trim(),name=$('#catalog-add-name').value.trim();
+    const executable=path.startsWith('"')&&path.endsWith('"')?path.slice(1,-1).trim():path;
+    $('#catalog-add-error').hidden=true;if(!executable){catalogAddError('请填写程序的绝对 .exe 路径。');return;}catalogMutationBusy(true,'正在登记程序位置…');
+    try{const result=await api('/api/catalog/apps','POST',{name,executable});if(typeof result.app_id!=='string'||!Array.isArray(result.catalog?.apps)||!result.catalog.apps.some(app=>app.id===result.app_id))throw new Error('服务未返回可选中的软件记录，请刷新后核对。');
+      $('#catalog-search').value='';$('#catalog-running-only').checked=false;catalogUseMutation(result,result.app_id);$('#catalog-add-dialog').close();$('#catalog-add-form').reset();
+      activity(result.duplicate?'已选中清单中的该软件；登记未重复添加。':'已将软件加入本机清单；尚未启动程序或改变网络。','软件登记');toast(result.duplicate?'清单已有该软件，已选中。':'软件已添加到清单。');
+    }catch(error){catalogAddError(error);$('#catalog-add-status').textContent='添加未完成，请检查后重试；填写的内容已保留。';}
+    finally{catalogMutationBusy(false);}
+  }
+  async function catalogRemoveRegistration(){
+    const app=catalogApp();if(state.catalogMutationBusy||!app?.manual||!app.manual_id)return;catalogMutationBusy(true);
+    try{const result=await api('/api/catalog/apps/remove','POST',{manual_id:app.manual_id});catalogUseMutation(result,state.catalogSelected);toast('已移除手动登记。软件和文件仍保留。');activity(`${app.name}：已移除清单登记，不卸载软件或删除文件。`,'软件登记');}
+    catch(error){toast(error.message,true);activity(error.message,'需处理');}finally{catalogMutationBusy(false);}
+  }
 
   function addApp(id, position) {
     if(id==='codex'){state.selected={kind:'protected',id:'codex'};renderGraph();renderInspector();showInspector();return;}
@@ -265,7 +380,7 @@
   document.addEventListener('click',async event=>{const button=event.target.closest('[data-copy]');if(!button)return;try{await navigator.clipboard.writeText(button.dataset.copy);toast('已复制本地入口；需要在支持的应用中显式使用。');}catch(_){toast(`请复制：${button.dataset.copy}`);}});
   $$('[data-dock]').forEach(button=>button.addEventListener('click',()=>switchDock(button.dataset.dock)));$('#expand-dock').addEventListener('click',()=>{const expanded=$('.workbench').classList.toggle('dock-expanded');$('#expand-dock').setAttribute('aria-label',expanded?'收起活动面板':'展开活动面板');requestEdges();});
   $('#system-preview-button').addEventListener('click',systemPreview);$('#system-preview-content').addEventListener('change',event=>{if(event.target.id==='system-consent')$('#system-apply-button').disabled=state.systemPreview?.allowed!==true||!event.target.checked;});$('#system-apply-button').addEventListener('click',systemApply);$('#system-confirm-button').addEventListener('click',()=>systemAction('confirm'));$('#system-restore-button').addEventListener('click',()=>systemAction('restore'));
-  document.addEventListener('keydown',event=>{const editing=/INPUT|TEXTAREA|SELECT/.test(event.target.tagName);if(event.key==='Escape')cancelConnection();if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();save();}if(editing)return;if(event.code==='Space'&&!event.target.closest('button,a,summary,[role=button]')){spaceDown=true;event.preventDefault();}if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='z'){event.preventDefault();const previous=state.undo.pop();if(previous){state.plan=previous;changed('已撤销一次方案编辑。');}}if(event.key==='0')overview();if(event.key==='+'||event.key==='=')zoom(1.12);if(event.key==='-')zoom(.89);});document.addEventListener('keyup',event=>{if(event.code==='Space')spaceDown=false;});window.addEventListener('blur',()=>{spaceDown=false;endPointer();});new ResizeObserver(()=>{const compact=innerWidth<=1000;if(compact!==state.compact){state.compact=compact;$('.main-grid').classList.toggle('compact',compact);renderGraph();requestEdges();}else requestEdges();}).observe($('#graph-viewport'));
+  document.addEventListener('keydown',event=>{if(state.workspace!=='routing')return;const editing=/INPUT|TEXTAREA|SELECT/.test(event.target.tagName);if(event.key==='Escape')cancelConnection();if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();save();}if(editing)return;if(event.code==='Space'&&!event.target.closest('button,a,summary,[role=button]')){spaceDown=true;event.preventDefault();}if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='z'){event.preventDefault();const previous=state.undo.pop();if(previous){state.plan=previous;changed('已撤销一次方案编辑。');}}if(event.key==='0')overview();if(event.key==='+'||event.key==='=')zoom(1.12);if(event.key==='-')zoom(.89);});document.addEventListener('keyup',event=>{if(event.code==='Space')spaceDown=false;});window.addEventListener('blur',()=>{spaceDown=false;endPointer();});new ResizeObserver(()=>{const compact=innerWidth<=1000;if(compact!==state.compact){state.compact=compact;$('.main-grid').classList.toggle('compact',compact);renderGraph();requestEdges();}else requestEdges();}).observe($('#graph-viewport'));
 
   async function poll() {
     if(polling||state.busy||location.protocol==='file:')return;polling=true;
@@ -290,5 +405,19 @@
   $('#close-inspector').addEventListener('click',()=>$('.main-grid').classList.remove('inspector-open'));
   $('#focus-view').addEventListener('click',()=>{state.focusMode=!state.focusMode;renderGraph();requestAnimationFrame(fit);});
   $('#shutdown-button').addEventListener('click',()=>{if(!confirm('关闭网页不会退出后台。现在退出后台服务？本工具将先尝试恢复原系统代理，再停止本地入口；使用这些入口的应用连接会断开。'))return;task($('#shutdown-button'),async()=>{const result=await api('/api/shutdown','POST',{});state.connected=false;state.runtime={running:false,channels:[]};renderAll();toast('后台退出请求已返回。此网页可关闭；要再运行请重新启动程序。');activity('已请求退出本工具后台；不是停止 v2rayN 或 Codex。','中继状态');});});
+  $$('[data-workspace]').forEach(button=>button.addEventListener('click',()=>switchWorkspace(button.dataset.workspace)));
+  $('#catalog-refresh-button').addEventListener('click',()=>refreshCatalog(true));
+  $('#catalog-add-button').addEventListener('click',showCatalogAdd);
+  $('#catalog-pick-executable').addEventListener('click',catalogPickExecutable);
+  $('#catalog-add-form').addEventListener('submit',catalogAddSubmit);
+  $('#catalog-add-dialog').addEventListener('cancel',event=>{if(state.catalogMutationBusy)event.preventDefault();});
+  $('#catalog-search').addEventListener('input',renderCatalog);
+  $('#catalog-running-only').addEventListener('change',renderCatalog);
+  $('#catalog-app-list').addEventListener('click',event=>{const button=event.target.closest('[data-catalog-app]');if(button){state.catalogSelected=button.dataset.catalogApp;state.profileResult=null;renderCatalog();$('#catalog-detail').scrollTop=0;}});
+  $('#catalog-layers').addEventListener('click',event=>{if(event.target.closest('[data-catalog-layer-route]')){switchWorkspace('routing');$('.system-access').open=true;showInspector();toast('选择已经运行的通道，再预览当前用户系统代理接入范围。');}});
+  $('#catalog-detail').addEventListener('click',event=>{if(event.target.closest('[data-catalog-remove]')){catalogRemoveRegistration();return;}const jump=event.target.closest('[data-catalog-jump]');if(jump){const section=$('[data-catalog-section="'+jump.dataset.catalogJump+'"]');if(section){if(section.tagName==='DETAILS')section.open=true;section.scrollIntoView({block:'start',behavior:'smooth'});}return;}const resource=event.target.closest('[data-catalog-resource]');if(resource){catalogResource(resource);return;}if(event.target.closest('#catalog-profile-preview'))catalogProfile();else if(event.target.closest('[data-catalog-routing]')){switchWorkspace('routing');toast('接线后预览并启动专属入口，再显式配置支持代理的应用。');}});
+  $('#catalog-detail').addEventListener('input',event=>{const app=catalogApp();if(!app)return;const draft=state.catalogDrafts[app.id]??={};if(event.target.id==='catalog-profile-proxy')draft.proxy_url=event.target.value;});
+  $('#catalog-detail').addEventListener('change',event=>{const app=catalogApp();if(!app||event.target.id!=='catalog-profile-mode')return;const draft=state.catalogDrafts[app.id]??={};draft.mode=event.target.value;$('#catalog-profile-proxy-field').hidden=draft.mode==='clear_environment';const mode=(app.launch_profile?.modes||[]).find(item=>item.id===draft.mode);$('#catalog-profile-mode-notice').textContent=mode?.notice||'仅影响新启动的进程，软件仍可能使用自己的代理设置。';});
+  $('#catalog-profile-download').addEventListener('click',()=>{if(!state.profileResult)return;download(state.profileResult.filename||'flowdesk-launch.ps1',state.profileResult.content,state.profileResult.mime||'text/plain;charset=utf-8');toast('脚本已下载；本次没有执行或重启软件。');});
   init();
 })();

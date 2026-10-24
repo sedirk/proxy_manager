@@ -5,6 +5,7 @@ import copy
 import json
 from pathlib import Path
 import threading
+import uuid
 from urllib.parse import urlsplit
 
 from . import __version__
@@ -90,6 +91,14 @@ class Service:
         self.closed = False
         self.closing = False
         self.audit_error = None
+        self._catalog_cache = None
+        self.custom_apps_error = None
+        from .catalog import manual_apps_document
+        try:
+            self.custom_apps = manual_apps_document(self.store.read('custom-apps.json', {'schema_version': 1, 'apps': []}))['apps']
+        except (OSError, ValueError, TypeError):
+            self.custom_apps = []
+            self.custom_apps_error = '手动软件清单无法读取；原文件保留，请修复 .local/custom-apps.json 后重启，当前不会覆盖它。'
         if discover:
             threading.Thread(target=self.discover, daemon=True, name='host-discovery').start()
 
@@ -132,6 +141,7 @@ class Service:
                         'title': change['name'] + '自上次检测后变化', 'detail': change['notice'],
                         'evidence_status': 'observed', 'affected_apps': []})
                 self.snapshot = found
+                self._catalog_cache = None
                 self.snapshot_stale = False
                 self.discovery_error = None
                 self.store.write('snapshot.json', found)
@@ -163,6 +173,88 @@ class Service:
             self.audit('保存设计方案', {'id': plan['id'], 'name': plan['name'],
                                              'running_unchanged': self.relay.status()['running']})
         return {'plan': plan}
+
+    def _catalog(self):
+        from .catalog import Catalog
+        self._ensure_open()
+        if self._catalog_cache is None:
+            self._catalog_cache = Catalog(copy.deepcopy(self.snapshot), data_root=self.root, manual_apps=self.custom_apps)
+        return self._catalog_cache
+
+    def catalog_state(self):
+        with self.lock:
+            value = self._catalog().describe()
+            return {**value, 'snapshot_stale': self.snapshot_stale,
+                    'snapshot_captured_at': self.snapshot.get('captured_at'),
+                    'manual_registry_error': self.custom_apps_error,
+                    'discovering': self.discovering, 'discovery_error': self.discovery_error}
+
+    def catalog_add_app(self, value):
+        from .catalog import application_executable_path, application_display_name, _key
+        executable = application_executable_path(value.get('executable'))
+        name = application_display_name(value.get('name'), executable)
+        with self.lock:
+            self._ensure_open()
+            if self.custom_apps_error:
+                raise RuntimeError(self.custom_apps_error)
+            existing = next((item for item in self.custom_apps if _key(item['executable']) == _key(executable)), None)
+            if existing:
+                catalog = self.catalog_state()
+                app = next(item for item in catalog['apps'] if item['manual_id'] == existing['id'])
+                return {'catalog': catalog, 'app_id': app['id'], 'duplicate': True}
+            if len(self.custom_apps) >= 256:
+                raise ValueError('最多可手动登记 256 个软件，请先移除不需要的登记')
+            record = {'id': 'manual-' + uuid.uuid4().hex, 'name': name,
+                      'executable': executable, 'created_at': now()}
+            updated = [*self.custom_apps, record]
+            # Persist first; failed atomic storage must not create an in-memory
+            # entry that disappears after restart.
+            self.store.write('custom-apps.json', {'schema_version': 1, 'apps': updated})
+            self.custom_apps = updated
+            self._catalog_cache = None
+            self.audit('手动登记本机软件（未执行）', {'manual_id': record['id'], 'name': name, 'executable': executable})
+            catalog = self.catalog_state()
+            app = next(item for item in catalog['apps'] if item['manual_id'] == record['id'])
+            return {'catalog': catalog, 'app_id': app['id'], 'duplicate': False}
+
+    def catalog_remove_app(self, value):
+        manual_id = value.get('manual_id')
+        if not isinstance(manual_id, str):
+            raise ValueError('请提供所选手动登记的 manual_id')
+        with self.lock:
+            self._ensure_open()
+            if self.custom_apps_error:
+                raise RuntimeError(self.custom_apps_error)
+            found = next((item for item in self.custom_apps if item['id'] == manual_id), None)
+            if found is None:
+                raise ValueError('手动登记不存在或已移除，请刷新清单')
+            updated = [item for item in self.custom_apps if item['id'] != manual_id]
+            self.store.write('custom-apps.json', {'schema_version': 1, 'apps': updated})
+            self.custom_apps = updated
+            self._catalog_cache = None
+            self.audit('移除本机软件登记（保留程序与现有进程）', {'manual_id': manual_id})
+            return {'catalog': self.catalog_state()}
+
+    def catalog_resource(self, value):
+        with self.lock:
+            catalog = self._catalog()
+            app_id, resource_id = value.get('app_id'), value.get('resource_id')
+            action = value.get('action')
+            if action == 'tail':
+                return catalog.tail(app_id, resource_id, max_bytes=16384)
+            if action == 'open':
+                result = catalog.open_resource(app_id, resource_id)
+                self.audit('打开已发现应用资源所在目录', {'app_id': app_id, 'resource_id': resource_id})
+                return result
+            raise ValueError('只支持查看日志尾部或打开已发现资源所在目录')
+
+    def catalog_launch_profile(self, value):
+        with self.lock:
+            result = self._catalog().export_launch_profile(
+                value.get('app_id'), value.get('mode'), value.get('proxy_url', ''),
+                arguments=value.get('arguments'))
+            self.audit('导出新进程启动配置（未执行）', {'app_id': value.get('app_id'), 'mode': value.get('mode')})
+            return result
 
     def preview(self, value):
         plan = design_plan(value)
@@ -300,6 +392,7 @@ class Service:
         elif kind == 'diagnostics':
             value = self.state()
             value['events'] = self.relay.events(limit=300)
+            value['application_catalog'] = self.catalog_state()
             value['export_notice'] = '保留域名、端口、进程名、路径与 IP 以便诊断；不包含请求正文、认证、订阅或备份。分享前可自行检查。'
         else:
             raise ValueError('未知的导出类型')

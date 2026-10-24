@@ -120,11 +120,24 @@ class Handler(BaseHTTPRequestHandler):
                 result = {'app': 'proxy-patchbay', 'version': __version__, 'instance_id': self.server.instance_id}
             elif key == ('GET', '/api/state'):
                 result = service.state()
+            elif key == ('GET', '/api/catalog'):
+                result = service.catalog_state()
             elif key == ('GET', '/api/events'):
                 after = int(parse_qs(parsed.query).get('after_id', ['0'])[0])
                 result = {'events': service.relay.events(after_id=after), 'runtime': service.relay.status()}
             elif key == ('POST', '/api/discover'):
                 result = service.discover()
+            elif key == ('POST', '/api/catalog/resource'):
+                result = service.catalog_resource(value)
+            elif key == ('POST', '/api/catalog/launch-profile'):
+                result = service.catalog_launch_profile(value)
+            elif key == ('POST', '/api/catalog/apps'):
+                result = service.catalog_add_app(value)
+            elif key == ('POST', '/api/catalog/apps/remove'):
+                result = service.catalog_remove_app(value)
+            elif key == ('POST', '/api/catalog/pick-executable'):
+                from .file_picker import choose_executable
+                result = choose_executable()
             elif key == ('PUT', '/api/plan'):
                 result = service.save_plan(value.get('plan', value))
             elif key == ('POST', '/api/preview'):

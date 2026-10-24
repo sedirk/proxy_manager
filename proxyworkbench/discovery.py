@@ -46,9 +46,14 @@ _APP_SPECS = {
     "chrome": ("Chrome", {"chrome.exe"}, ("google chrome",)),
     "edge": ("Microsoft Edge", {"msedge.exe"}, ("microsoft edge",)),
     "firefox": ("Firefox", {"firefox.exe"}, ("mozilla firefox",)),
+    "git": ("Git", {"git.exe", "git-remote-http.exe", "git-remote-https.exe"}, ("git version", "git for windows")),
+    "curl": ("curl", {"curl.exe"}, ()),
+    "python": ("Python", {"python.exe", "pythonw.exe"}, ("python 3.",)),
+    "node": ("Node.js", {"node.exe"}, ("node.js",)),
+    "vscode": ("Visual Studio Code", {"code.exe"}, ("visual studio code",)),
 }
 _ACCELERATOR_APPS = {"uu"}
-_PROXY_APPS = set(_APP_SPECS) - {"codex", "steam", "wgc", "rustdesk", "chrome", "edge", "firefox"} - _ACCELERATOR_APPS
+_PROXY_APPS = {"v2rayn", "xray", "v2ray", "sing_box", "clash", "mihomo", "clash_verge", "mihomo_party", "ssr", "surge", "nekobox", "hiddify", "proxifier"}
 _CORE_NAMES = {"xray.exe", "v2ray.exe", "sing-box.exe", "singbox.exe", "clash.exe", "clash-meta.exe", "clash-win64.exe", "clash-windows-amd64.exe", "mihomo.exe", "verge-mihomo.exe", "sslocal.exe"}
 
 
@@ -204,7 +209,7 @@ try { $taskResult.processes = @(Get-CimInstance Win32_Process -Property Name,Pro
 try { $taskResult.core_commands = @(Get-CimInstance Win32_Process -Filter "CORE_FILTER" -Property Name,ProcessId,ExecutablePath,CommandLine | Select-Object Name,ProcessId,ExecutablePath,CommandLine) } catch { $taskResult.errors.core_commands = $_.Exception.Message }
 try { $taskResult.tcp_listeners = @(Get-NetTCPConnection -State Listen | Select-Object LocalAddress,LocalPort,OwningProcess) } catch { $taskResult.errors.tcp_listeners = $_.Exception.Message }
 try { $taskResult.udp_listeners = @(Get-NetUDPEndpoint | Select-Object LocalAddress,LocalPort,OwningProcess) } catch { $taskResult.errors.udp_listeners = $_.Exception.Message }
-try { $taskResult.connections = @(Get-NetTCPConnection -State Established | Select-Object OwningProcess,RemoteAddress,RemotePort) } catch { $taskResult.errors.connections = $_.Exception.Message }
+try { $taskResult.connections = @(Get-NetTCPConnection -State Established | Select-Object OwningProcess,LocalAddress,LocalPort,RemoteAddress,RemotePort) } catch { $taskResult.errors.connections = $_.Exception.Message }
 try { $taskResult.adapters = @(Get-NetAdapter -IncludeHidden | Select-Object Name,InterfaceDescription,ifIndex,Status) } catch { $taskResult.errors.adapters = $_.Exception.Message }
 try { $taskResult.ip_interfaces = @(Get-NetIPInterface | Select-Object InterfaceIndex,InterfaceAlias,AddressFamily,ConnectionState,InterfaceMetric,NlMtu) } catch { $taskResult.errors.ip_interfaces = $_.Exception.Message }
 try { $taskResult.addresses = @(Get-NetIPAddress | Select-Object InterfaceIndex,IPAddress,PrefixLength,AddressFamily,AddressState) } catch { $taskResult.errors.addresses = $_.Exception.Message }
@@ -656,6 +661,70 @@ def _apps(raw, endpoints, process_by_pid):
     return sorted(found.values(), key=lambda item: item["id"])
 
 
+def _network_processes(raw, endpoints, process_by_pid):
+    """Bounded PID/socket evidence for software without a named adapter.
+
+    A public peer is not proof of direct routing. Core upstream peers remain
+    hidden, consistent with the existing discovery privacy contract.
+    """
+    found = {}
+    candidates = [entry for entry in endpoints if entry['transport'] == 'tcp'
+                  and entry['role'] == 'proxy_candidate']
+    for row in _rows(raw.get('connections')):
+        pid = _integer(row.get('OwningProcess'))
+        process = process_by_pid.get(pid)
+        if not process:
+            continue
+        if pid not in found and len(found) >= 512:
+            continue
+        name = _safe_text(process.get('Name'), 100)
+        executable = _safe_text(process.get('ExecutablePath'), 500) or None
+        app_id = _app_id(name, executable or '')
+        identity = (executable or name).replace('\\', '/').casefold()
+        item = found.setdefault(pid, {
+            'id': 'process-' + hashlib.sha256(identity.encode('utf-8')).hexdigest()[:16],
+            'name': name, 'executable': executable, 'pid': pid,
+            'parent_pid': _integer(process.get('ParentProcessId')), 'app_id': app_id,
+            'tcp_count': 0, 'connections': [], 'connections_truncated': False,
+            'evidence_status': 'observed', 'effective_proxy': 'unknown',
+        })
+        item['tcp_count'] += 1
+        if len(item['connections']) >= 32:
+            item['connections_truncated'] = True
+            continue
+        try:
+            remote = ipaddress.ip_address(str(row.get('RemoteAddress', '')).split('%', 1)[0])
+        except ValueError:
+            continue
+        port = _integer(row.get('RemotePort'))
+        matches = []
+        if remote.is_loopback:
+            for endpoint in candidates:
+                if endpoint['port'] != port:
+                    continue
+                try:
+                    bound = ipaddress.ip_address(endpoint['address'].split('%', 1)[0])
+                except ValueError:
+                    continue
+                # Dual-stack behavior cannot be inferred from an IPv6 listener.
+                if bound.version == remote.version and (bound == remote or bound.is_unspecified):
+                    matches.append(endpoint['id'])
+        # Persist only loopback peers. Public destination lists can reveal
+        # browsing activity; an upstream core's address/port can reveal nodes.
+        hidden = not remote.is_loopback
+        core_peer = app_id in _PROXY_APPS and hidden
+        item['connections'].append({
+            'remote_address': None if hidden else str(remote),
+            'remote_port': None if core_peer else port,
+            'local_address': _safe_text(row.get('LocalAddress'), 100) or None,
+            'local_port': _integer(row.get('LocalPort')),
+            'proxy_endpoint_ids': matches, 'remote_redacted': hidden,
+            'remote_scope': 'loopback' if remote.is_loopback else 'non_loopback',
+            'meaning': '代理上游细节已隐藏' if core_peer else '已观察 TCP 对端，非回环地址已摘要；最终出口与 UDP 路径未确认',
+        })
+    return sorted(found.values(), key=lambda item: (item['name'].casefold(), item['pid']))
+
+
 def _findings(layers, interfaces, apps, endpoints, errors):
     result = []
     def add(identifier, title, detail, severity="info", affected=None):
@@ -733,6 +802,7 @@ def snapshot(*, timeout=15.0) -> dict:
                          "error": errors.get(key) or errors.get("powershell") if key not in raw else None}
     return {"schema_version": SCHEMA_VERSION, "captured_at": _now(), "platform": "windows" if supported else sys.platform,
             "evidence_status": "observed", "layers": layers, "endpoints": endpoints, "apps": apps, "interfaces": interfaces,
+            "network_processes": _network_processes(raw, endpoints, process_by_pid),
             "findings": _findings(layers, interfaces, apps, endpoints, errors),
             "capabilities": {"read_only": True, "active_probes": False, "protocol_verification": False,
                              "other_process_environment_read": False, "remote_node_details_exported": False,

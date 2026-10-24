@@ -1,5 +1,6 @@
 """Separate bundled read-only assets from persistent per-user state."""
 import os
+import json
 from pathlib import Path
 import sys
 
@@ -16,6 +17,20 @@ def data_root(override=None):
     if override is not None:
         return Path(override).expanduser().resolve()
     if frozen():
+        executable_dir = Path(sys.executable).resolve().parent
+        candidates = [executable_dir]
+        if executable_dir.name.casefold() == 'dist':
+            candidates.append(executable_dir.parent)
+        for project in candidates:
+            marker = project / 'flowdesk-project.json'
+            try:
+                if marker.is_symlink() or not marker.is_file() or marker.stat().st_size > 1024:
+                    continue
+                value = json.loads(marker.read_text(encoding='utf-8-sig'))
+                if value == {'schema_version': 1, 'data_root': '.'}:
+                    return project
+            except (OSError, ValueError):
+                continue
         base = os.environ.get('LOCALAPPDATA')
         return (Path(base) if base else Path.home() / 'AppData' / 'Local') / 'FlowDesk'
     return asset_root()

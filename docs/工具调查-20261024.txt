@@ -1,0 +1,96 @@
+Windows 代理工具调查
+调查日期：2026-10-24（Asia/Singapore）
+来源范围：软件官方站、官方文档、维护者 GitHub 仓库，以及 Microsoft 文档。
+
+结论与项目定位
+
+已经存在能按软件选择代理、直连或阻断，并显示连接与日志的工具。本轮未找到同时把 Windows 各层代理配置、软件自带配置、逐应用流量接管、实际出口证据与日志定位全部统一起来的完整工具。这是本轮调查结论，不代表市场上绝对没有其他产品。
+
+本项目适合定位为“可视化代理管理和诊断台”：围绕软件说明配置来源、希望采用的出口、可用控制方式、运行证据和日志位置。转发能力可以接入成熟引擎；已有 TCP 接线台可作为其中一个接入方式。界面需要分别说明配置是否保存、应用是否采纳，以及实际观察到什么连接。
+
+现成工具比较
+
+1. ProxyBridge
+   官方项目采用 MIT 许可，提供逐应用规则、HTTP/SOCKS5 代理选择、直连/阻断、GUI/CLI。Windows 版本使用 WinDivert，连接日志与实时连接表能显示 PID、目标、规则、代理和流量，比较接近逐软件控制与验证的需求。
+   边界：HTTP 代理不能承载 UDP；其 Windows 文档明确写 HTTP 代理规则下 UDP 会直连。UDP 代理需要 SOCKS5 服务端支持 UDP ASSOCIATE。域名关联依赖可观察的 DNS，使用加密 DNS 时可能只有 IP。需要保留引擎兼容性和实际请求验证，不能只凭配置即显示强制成功。
+   官方主页：https://proxybridge.interceptsuite.com/
+   官方源码：https://github.com/InterceptSuite/ProxyBridge
+   连接与日志：https://proxybridge.interceptsuite.com/docs/windows-monitoring/
+   代理协议与检测：https://proxybridge.interceptsuite.com/docs/windows-proxy-servers/
+   Windows 限制：https://proxybridge.interceptsuite.com/docs/windows-troubleshooting/
+
+2. ProxiFyre
+   当前官方资料已包含 Windows GUI、服务、日志和多 SOCKS5 逐应用路由，不能再按旧版“仅控制台工具”描述。支持 TCP、UDP、QUIC，依赖 Windows Packet Filter；官方项目许可为 AGPLv3。
+   边界：这是 SOCKS5 流量重定向工具；IPv6 目的地需要本机和服务端支持，部分分片和进程归属失败场景仍有直连边界。它并不统一其他软件自己的代理配置。
+   官方介绍：https://www.ntkernel.com/proxifyre/
+   官方仓库：https://github.com/wiresock/proxifyre/
+   GUI 文档：https://github.com/wiresock/proxifyre/blob/main/docs/gui.md
+
+3. Proxifier v4
+   支持按程序、路径、PID、目标和端口选择 Direct、代理、代理链或 Block。连接窗能显示规则与代理；可设置日志目录，Verbose 日志包含规则处理和 DNS 信息。
+   边界：官方覆盖说明以 TCP 为主，不能把它作为通用 UDP 转发方案。
+   功能范围：https://www.proxifier.com/docs/win-v4/
+   规则：https://www.proxifier.com/docs/win-v4/rules.html
+   连接界面：https://www.proxifier.com/docs/win-v4/ui.html
+   日志：https://www.proxifier.com/docs/win-v4/logging.html
+
+4. ProxyCap 与 NetDetour
+   ProxyCap 官方现在推荐继任产品 NetDetour。后者提供逐应用规则、连接监控、代理测试与错误日志，不能把旧 ProxyCap 的所有协议能力直接套在新产品上。
+   边界：官方迁移比较表明确写 NetDetour 的 UDP 能力为“仅阻断”，旧 ProxyCap 可经 SOCKS 处理 UDP；NetDetour 的 HTTP/3 文档也明确仅代理 TCP。其 WFP 模式仍标为实验性。
+   官方继任与比较：https://www.netdetour.com/pcap/
+   功能：https://www.netdetour.com/
+   逐应用配置：https://www.netdetour.com/support/quick-start-guide/
+   UDP/HTTP3 边界：https://www.netdetour.com/support/kb/configuring-HTTP-3-to-work-through-a-TCP-proxy/
+   WFP 模式：https://www.netdetour.com/support/kb/what-is-wfp-mode-and-how-to-enable-it/
+
+5. Clash Verge Rev / mihomo
+   提供系统代理、TUN、可视化节点和规则。mihomo 支持 PROCESS-NAME/PATH 规则；连接 API 返回进程信息、代理链、命中规则和流量，日志 API 可输出结构化记录，适合作为管理台可接入的成熟内核。
+   边界：这些记录解释的是进入该内核的连接。未进入内核的应用、应用自己的其他代理来源、UDP 出口不支持等情况需要单独说明。TUN 是路由层接管，不能等同于“把系统代理打开”。
+   官方 GUI：https://www.clashverge.dev/
+   官方仓库：https://github.com/clash-verge-rev/clash-verge-rev
+   规则：https://wiki.metacubex.one/en/config/rules/
+   TUN：https://wiki.metacubex.one/en/config/inbound/tun/
+   连接与日志 API：https://wiki.metacubex.one/en/api/
+
+6. v2rayN
+   官方把系统代理入口与核心路由分开说明：系统代理可为跟随该设置的软件提供入口，核心再按规则选择出口。官方 FAQ 区分 guiLogs 界面日志与主界面信息栏中的核心日志。
+   边界：系统代理不会让所有软件自动接入；“不改变系统代理”也不等于所有流量直连。读取运行配置和日志前要识别当前安装位置与核心，不把历史路径当作本机已发现文件。
+   官方项目：https://github.com/2dust/v2rayN
+   系统代理与路由：https://github.com/2dust/v2rayN/wiki/Description-of-system-proxy-routing
+   日志与常见问题：https://github.com/2dust/v2rayN/wiki/Faq
+
+7. Sysinternals TCPView / Process Monitor
+   TCPView 展示 TCP/UDP 端点及所属进程；Process Monitor 的文件、注册表和进程活动可帮助寻找应用实际读取的配置和写出的日志。
+   边界：它们属于诊断工具，不能直接承担统一代理策略管理。端点和进程归属本身也不能完整证明最终经过哪个上游出口。
+   TCPView：https://learn.microsoft.com/en-us/sysinternals/downloads/tcpview
+   Process Monitor：https://learn.microsoft.com/en-us/sysinternals/downloads/procmon
+
+Windows 配置与证据边界
+
+• Windows 设置中的系统代理/WinINet、WinHTTP、PAC/WPAD、用户/机器环境变量、进程启动环境，以及应用自己的设置可能同时存在。应用可覆盖系统默认设置，也可以使用其他网络库。管理台应展示来源和适用范围，而不是合并成一个“所有程序当前代理”。
+  Microsoft 概览：https://techcommunity.microsoft.com/blog/coreinfrastructureandsecurityblog/proxies-proxies-everywhere-but-still-no-internet-overview-of-the-windows-proxies/4108939
+  WinHTTP API：https://learn.microsoft.com/en-us/windows/win32/api/winhttp/nf-winhttp-winhttpopen
+  WinINet 配置在 WinHTTP 中的使用：https://learn.microsoft.com/en-us/windows/win32/winhttp/setting-wininet-proxy-configurations-in-winhttp
+
+• 环境变量属于进程环境块，子进程默认继承父进程。用户/机器变量变更，不代表已经改变现有应用的环境；通过本工具启动应用时注入变量，也只适用于实际支持这些变量的程序。代理连接测试由管理台发起时，只能证明该测试的路径，不能证明目标软件已采用同一路径。
+  Windows 进程环境：https://learn.microsoft.com/en-us/windows/win32/procthread/environment-variables
+  curl 的变量规则示例：https://everything.curl.dev/usingcurl/proxies/env.html
+
+• TCP PID 表能提供本地和远端端点；UDP PID 表只有本地地址、端口和 PID，没有目的地址。因此普通 UDP 端点列表不能包装成“已验证 UDP 走向”。
+  TCP 结构：https://learn.microsoft.com/en-us/windows/win32/api/tcpmib/ns-tcpmib-mib_tcprow_owner_pid
+  UDP 结构：https://learn.microsoft.com/en-us/windows/win32/api/udpmib/ns-udpmib-mib_udprow_owner_pid
+
+• 连到 127.0.0.1 只能证明下一跳到达本地监听器，核心仍可能选择 DIRECT。TUN 下连接表显示目标公网 IP，也不能据此证明绕过了代理。公网 IP 检测是检测请求的出口证据，需要标出发起程序、目标、时间和采用的接入方式。
+  可关联的内核事实字段：https://wiki.metacubex.one/en/api/
+
+建议呈现的证据级别
+
+1. 配置已读取：值、来源、作用范围和读取时间。
+2. 控制已应用：实际修改或启动的对象，是否需要重启，是否通过读回确认。
+3. 连接已观察：PID、本地/远端地址或下一跳，明确 TCP/UDP 与采样范围。
+4. 出口已关联：来自内核的命中规则、代理链、DIRECT 决策等事实。
+5. 应用已实测：目标软件发起的实际请求及其关联证据。
+
+日志位置也要分为“官方默认位置/候选路径”“本机已存在”“本次观察到写入”。候选文件夹不存在时仍可提供查找说明，不应标为已发现日志。
+
+本次调查没有安装代理工具、下载执行文件或改变系统代理、TUN、路由、环境变量及现有连接。
