@@ -274,6 +274,11 @@ class CatalogTests(unittest.TestCase):
         self.assertIn('param([switch]$Launch)', result['content'])
         self.assertIn('EnvironmentVariables', result['content'])
         self.assertIn("'HTTP_PROXY'", result['content'])
+        for name in ('ELECTRON_GET_USE_PROXY','GLOBAL_AGENT_HTTP_PROXY','GLOBAL_AGENT_HTTPS_PROXY',
+                     'GLOBAL_AGENT_NO_PROXY','GLOBAL_AGENT_ENVIRONMENT_VARIABLE_NAMESPACE'):
+            self.assertIn("EnvironmentVariables['" + name + "'] =", result['content'])
+        self.assertIn("EnvironmentVariables['ELECTRON_GET_USE_PROXY'] = '1'",result['content'])
+        self.assertIn("EnvironmentVariables['GLOBAL_AGENT_HTTPS_PROXY'] = 'http://127.0.0.1:10808'",result['content'])
         self.assertNotIn('SetEnvironmentVariable', result['content'])
         self.assertNotIn('Stop-Process', result['content'])
         self.assertNotIn('netsh', result['content'])
@@ -285,6 +290,10 @@ class CatalogTests(unittest.TestCase):
         self.assertIn("EnvironmentVariables.Remove('ALL_PROXY')", result['content'])
         self.assertNotIn('WinINet', result['content'])
         self.assertNotIn("EnvironmentVariables['ALL_PROXY'] =", result['content'])
+        for name in ('ELECTRON_GET_USE_PROXY','GLOBAL_AGENT_HTTP_PROXY','GLOBAL_AGENT_HTTPS_PROXY',
+                     'GLOBAL_AGENT_NO_PROXY','GLOBAL_AGENT_ENVIRONMENT_VARIABLE_NAMESPACE'):
+            self.assertIn("EnvironmentVariables.Remove('" + name + "')",result['content'])
+            self.assertNotIn("EnvironmentVariables['" + name + "'] =",result['content'])
 
     def test_proxy_profile_rejects_credentials_commands_and_unsupported_protocols(self):
         catalog = self.catalog()
@@ -306,6 +315,8 @@ class CatalogTests(unittest.TestCase):
         self.assertIn("a''$(Get-Secret)", result['content'])
         self.assertNotIn('Get-Process', result['content'])
         self.assertNotIn("EnvironmentVariables['HTTP_PROXY'] =", result['content'])
+        self.assertIn("EnvironmentVariables.Remove('ELECTRON_GET_USE_PROXY')",result['content'])
+        self.assertNotIn("EnvironmentVariables['ELECTRON_GET_USE_PROXY'] =",result['content'])
 
     def test_codex_and_proxy_cores_cannot_export_relaunch_scripts(self):
         snapshot = {'apps': []}

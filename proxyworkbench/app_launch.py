@@ -8,7 +8,8 @@ import sys
 import ctypes
 from contextlib import contextmanager
 
-from .catalog import application_executable_path, _PROTECTED_EXES, _PROXY_NAMES
+from .catalog import application_executable_path, _PROTECTED_EXES
+from .proxy_environment import child_environment
 
 _LOCK = threading.Lock()
 
@@ -84,11 +85,10 @@ def launch(executable, proxy_url='', mode='http_environment'):
         if mode == 'http_environment' and (parsed.scheme != 'http' or not parsed.hostname or not ipaddress.ip_address(parsed.hostname).is_loopback
                 or not parsed.port or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment):
             raise ValueError('启动方案的本机代理入口无效，请重新检测。')
-        environment = os.environ.copy() if mode == 'inherit' else {key: value for key, value in os.environ.items() if key.upper() not in _PROXY_NAMES}
+        environment = child_environment(os.environ, mode, proxy_url)
         arguments = []
         browser = Path(executable).name.casefold() in {'chrome.exe', 'msedge.exe'}
         if mode == 'http_environment':
-            environment.update(HTTP_PROXY=proxy_url, HTTPS_PROXY=proxy_url, ALL_PROXY=proxy_url, NO_PROXY='localhost,127.0.0.1,::1')
             if browser:arguments.append('--proxy-server=' + proxy_url)
         elif mode == 'clear_environment' and browser:
             arguments.append('--no-proxy-server')

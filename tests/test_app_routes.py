@@ -32,6 +32,7 @@ class AppRouteTests(unittest.TestCase):
             state=self.save();launch.assert_not_called()
         route=next(item for item in state['routes'] if item['app_id']==self.app_id)
         self.assertTrue(route['saved']);self.assertTrue(route['can_apply'])
+        self.assertIn('Electron',route['notice'])
         self.service.close();self.service=Service(self.root,discover=False)
         route=next(item for item in self.service.app_routes_state()['routes'] if item['app_id']==self.app_id)
         self.assertEqual(route['proxy_url'],'http://127.0.0.1:10808')
@@ -78,6 +79,42 @@ class AppRouteTests(unittest.TestCase):
 
 
 class NativeAppModeTests(unittest.TestCase):
+    def test_electron_download_proxy_replaces_conflicting_inherited_settings_only_in_child(self):
+        with tempfile.TemporaryDirectory(prefix='electron-launch-') as folder:
+            executable=Path(folder)/'Hermes-Setup.exe';executable.write_bytes(b'fixture')
+            inherited={'https_proxy':'http://127.0.0.1:1111','electron_get_use_proxy':'0',
+                       'global_agent_https_proxy':'http://127.0.0.1:2222',
+                       'GLOBAL_AGENT_ENVIRONMENT_VARIABLE_NAMESPACE':'OLD_',
+                       'GLOBAL_AGENT_NO_PROXY':'*','UNRELATED_SETTING':'keep'}
+            with patch.dict(os.environ,inherited,clear=True),patch.object(app_launch,'_running_images',return_value=[]),patch.object(app_launch.subprocess,'Popen',return_value=Mock(pid=42)) as spawn:
+                before=dict(os.environ)
+                app_launch.launch(str(executable),'http://[::1]:10808')
+                environment=spawn.call_args.kwargs['env']
+                self.assertEqual(environment['ELECTRON_GET_USE_PROXY'],'1')
+                for name in ('HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','GLOBAL_AGENT_HTTP_PROXY','GLOBAL_AGENT_HTTPS_PROXY'):
+                    self.assertEqual(environment[name],'http://[::1]:10808')
+                self.assertEqual(environment['GLOBAL_AGENT_ENVIRONMENT_VARIABLE_NAMESPACE'],'GLOBAL_AGENT_')
+                self.assertNotEqual(environment['GLOBAL_AGENT_NO_PROXY'],'*')
+                self.assertEqual(environment['UNRELATED_SETTING'],'keep')
+                self.assertNotIn('https_proxy',environment)
+                self.assertEqual(dict(os.environ),before)
+
+    def test_clear_removes_electron_proxy_overrides_and_inherit_preserves_them(self):
+        with tempfile.TemporaryDirectory(prefix='electron-clear-') as folder:
+            executable=Path(folder)/'Hermes-Setup.exe';executable.write_bytes(b'fixture')
+            inherited={'HTTPS_PROXY':'http://127.0.0.1:1111','electron_get_use_proxy':'1',
+                       'global_agent_http_proxy':'http://127.0.0.1:2222',
+                       'GLOBAL_AGENT_HTTPS_PROXY':'http://127.0.0.1:3333',
+                       'global_agent_no_proxy':'example.test',
+                       'GLOBAL_AGENT_ENVIRONMENT_VARIABLE_NAMESPACE':'OLD_','UNRELATED_SETTING':'keep'}
+            with patch.dict(os.environ,inherited,clear=True),patch.object(app_launch,'_running_images',return_value=[]),patch.object(app_launch.subprocess,'Popen',return_value=Mock(pid=42)) as spawn:
+                before=dict(os.environ)
+                app_launch.launch(str(executable),'','clear_environment')
+                self.assertEqual(spawn.call_args.kwargs['env'],{'UNRELATED_SETTING':'keep','PYINSTALLER_RESET_ENVIRONMENT':'1'})
+                app_launch.launch(str(executable),'','inherit')
+                self.assertEqual(spawn.call_args.kwargs['env'],{**before,'PYINSTALLER_RESET_ENVIRONMENT':'1'})
+                self.assertEqual(dict(os.environ),before)
+
     def test_browser_flags_clear_and_inherit_are_applied_only_to_new_child(self):
         with tempfile.TemporaryDirectory(prefix='browser-launch-') as folder:
             executable=Path(folder)/'chrome.exe';executable.write_bytes(b'fixture')

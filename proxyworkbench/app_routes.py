@@ -45,10 +45,13 @@ def parse(value):
 def describe(app, record=None):
     executable=app.get('executable') or app.get('launch_profile',{}).get('executable')
     browser=bool(executable and Path(executable).name.casefold() in {'chrome.exe','msedge.exe'})
+    mode=record['mode'] if record else 'inherit'
+    notice='使用浏览器代理参数；仍需核对组织策略和实际请求。' if browser else '软件需要支持代理环境变量；清除变量不保证绕过软件私有代理、系统代理或 TUN。'
+    if mode=='http_environment':notice+=' 已包含 Electron 下载器代理兼容设置，请在原软件验证实际下载。'
     return {'app_id':app['id'],'saved':record is not None,'key':route_key(executable) if executable else None,
-            'executable':executable,'mode':record['mode'] if record else 'inherit',
+            'executable':executable,'mode':mode,
             'proxy_url':record['proxy_url'] if record else '',
             'can_apply':bool(executable and app.get('launch_profile',{}).get('available') and not app.get('protected')),
             'method':'浏览器显式参数 + 新进程环境' if browser else '新进程代理环境',
-            'notice':'使用浏览器代理参数；仍需核对组织策略和实际请求。' if browser else '软件需要支持代理环境变量；清除变量不保证绕过软件私有代理、系统代理或 TUN。',
+            'notice':notice,
             'running':bool(app.get('running_processes'))}

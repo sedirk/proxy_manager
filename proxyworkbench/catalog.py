@@ -20,6 +20,7 @@ import unicodedata
 from urllib.parse import urlsplit
 
 from .privacy import redact
+from .proxy_environment import PROXY_NAMES as _PROXY_NAMES, assignments as proxy_assignments
 
 _PROTECTED = {'codex', 'v2rayn', 'xray', 'v2ray', 'sing_box', 'clash', 'mihomo',
               'clash_verge', 'mihomo_party', 'ssr', 'surge', 'nekobox', 'hiddify',
@@ -50,8 +51,6 @@ _MAIN_EXES = {
     'proxycap': ('proxycap.exe',), 'uu': ('uu.exe', 'uu_ball.exe', 'uubooster.exe'),
     'flowdesk': ('flowdesk.exe',),
 }
-_PROXY_NAMES = ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
-                'FTP_PROXY', 'GRPC_PROXY', 'CGI_HTTP_PROXY')
 _MAX_BYTES = 65536
 _REPARSE = 0x400
 _MANUAL_ID = re.compile(r'manual-[0-9a-f]{32}\Z')
@@ -467,7 +466,7 @@ class Catalog:
                 exists, info, _ = _path_record(executable)
                 available = available and exists and bool(info and stat.S_ISREG(info.st_mode))
             modes = [{'id': 'clear_environment', 'label': '仅清除新进程代理环境', 'notice': '只清理新进程的代理变量，应用自身代理、系统代理与 TUN 仍可能生效。'},
-                     {'id': 'http_environment', 'label': '设置新进程 HTTP 代理环境', 'notice': '设置 HTTP_PROXY / HTTPS_PROXY / ALL_PROXY；是否采用由具体应用或网络库决定。'}]
+                     {'id': 'http_environment', 'label': '设置新进程 HTTP 代理环境', 'notice': '同时启用 Electron 下载器代理兼容；仅影响新进程及继承环境的子进程，是否采用由具体软件决定。'}]
             if Path(executable or '').name.casefold() in {'curl.exe', 'git.exe'}:
                 modes.append({'id': 'socks_environment', 'label': '设置新进程 SOCKS 环境', 'notice': '通过 ALL_PROXY 提供 SOCKS5h；仅为支持该变量的 curl/Git 传输提供入口。'})
             app = {'id': app_id, 'name': _text(original.get('name') or app_id, 140),
@@ -625,11 +624,9 @@ class Catalog:
         ]
         lines += ["$taskStart.EnvironmentVariables.Remove(" + quote(name) + ')' for name in _PROXY_NAMES]
         if mode == 'http_environment':
-            lines += ["$taskStart.EnvironmentVariables[" + quote(name) + '] = ' + quote(endpoint) for name in ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY')]
-        elif mode == 'socks_environment':
-            lines += ["$taskStart.EnvironmentVariables['ALL_PROXY'] = " + quote(endpoint)]
-        if mode != 'clear_environment':
-            lines += ["$taskStart.EnvironmentVariables['NO_PROXY'] = 'localhost,127.0.0.1,::1'"]
+            lines += ['# Enable proxy support in Electron downloaders, including older global-agent versions.']
+        lines += ["$taskStart.EnvironmentVariables[" + quote(name) + '] = ' + quote(value)
+                  for name, value in proxy_assignments(mode, endpoint).items()]
         lines += ['$taskProcess = [System.Diagnostics.Process]::Start($taskStart)',
                   'Write-Host ("Started selected app. PID: " + $taskProcess.Id)',
                   "Write-Host 'Environment only. Verify the application connection and logs separately.'", '']

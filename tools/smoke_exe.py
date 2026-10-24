@@ -252,6 +252,15 @@ def main():
             assert manual_app['manual'] and manual_id
             visual_routes=api('/api/app-routes')
             assert any(route['app_id']==added['app_id'] for route in visual_routes['routes'])
+            # Check the packaged policy without starting the registered app.
+            profile=api('/api/catalog/launch-profile',{'app_id':added['app_id'],'mode':'http_environment','proxy_url':'http://127.0.0.1:10808'})
+            assert "EnvironmentVariables['ELECTRON_GET_USE_PROXY'] = '1'" in profile['content']
+            assert "EnvironmentVariables['GLOBAL_AGENT_HTTPS_PROXY'] = 'http://127.0.0.1:10808'" in profile['content']
+            clear_profile=api('/api/catalog/launch-profile',{'app_id':added['app_id'],'mode':'clear_environment'})
+            assert "EnvironmentVariables.Remove('ELECTRON_GET_USE_PROXY')" in clear_profile['content']
+            assert "EnvironmentVariables.Remove('GLOBAL_AGENT_HTTPS_PROXY')" in clear_profile['content']
+            assert "EnvironmentVariables['ELECTRON_GET_USE_PROXY'] =" not in clear_profile['content']
+            report['electron_proxy_profiles']={'http_opt_in':True,'legacy_global_agent':True,'clear_removes_overrides':True,'target_application_not_launched':True}
             visual_saved=api('/api/app-routes/save',{'app_id':added['app_id'],'mode':'inherit'})
             assert any(route['app_id']==added['app_id'] and route['saved'] and route['mode']=='inherit' for route in visual_saved['routes'])
             assert not api('/api/state')['runtime']['running']
