@@ -7,6 +7,7 @@
   <title>流向 · 本机代理工作台</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="guide.css">
+  <script src="routing-view.js" defer></script>
   <script src="app.js" defer></script>
   <script src="guide.js" defer></script>
 </head>
@@ -75,7 +76,7 @@
       <section class="canvas-panel" aria-label="可编辑的路由方案画布">
         <div class="canvas-topline"><div class="canvas-view-actions"><button id="toggle-library" class="icon-button" aria-label="展开或收起应用库" title="展开应用库">≡</button><span class="canvas-view-label"><i></i>方案视图</span><span class="canvas-topline-note">接线 ≠ 已接管应用</span><button id="focus-view" class="text-button">聚焦通道</button></div><div class="canvas-view-actions"><button id="arrange-button" class="text-button">整理画布</button><button id="toggle-inspector" class="icon-button" aria-label="展开或收起节点属性" title="节点属性">☷</button></div></div>
         <div id="graph-viewport" class="graph-viewport" tabindex="0" aria-label="路由节点画布。拖动节点，点击输出端再点击出口端口来接线。空格拖动画布，Ctrl 加滚轮缩放。">
-          <div id="graph-world" class="graph-world"><svg id="graph-connections" class="graph-connections" aria-label="方案连接"><defs><marker id="edge-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0 7 3.5 0 7"/></marker></defs><g id="edge-layer"></g><path id="pending-edge" class="pending-edge"/></svg><div id="node-layer"></div></div>
+          <div id="graph-world" class="graph-world"><svg id="graph-connections" class="graph-connections" aria-label="方案连接"><defs><marker id="edge-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0 7 3.5 0 7"/></marker><marker id="edge-arrow-draft" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0 7 3.5 0 7" fill="#82a6bf"/></marker></defs><g id="edge-layer"></g><path id="pending-edge" class="pending-edge"/></svg><div id="node-layer"></div></div>
           <div id="canvas-empty" class="canvas-empty" hidden><span class="empty-illustration">↗</span><h3>从一个应用开始</h3><p>将应用加入画布，再把输出接到出口。所有改动先作为方案保存。</p></div>
         </div>
         <div id="connection-hint" class="connection-hint" hidden><span>已选择输出，请点击一个出口的输入端口</span><button id="cancel-connection" class="text-button">取消 Esc</button></div>

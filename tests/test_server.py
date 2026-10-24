@@ -15,6 +15,7 @@ class ServerTests(unittest.TestCase):
         root = Path(cls.temp.name)
         (root / 'web').mkdir()
         (root / 'web/index.html').write_text('fixture', encoding='utf-8')
+        (root / 'web/routing-view.js').write_text('/* routing fixture */', encoding='utf-8')
         cls.server = ControlServer(('127.0.0.1', 0), root, discover=False)
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
@@ -44,6 +45,13 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.request('/api/session', auth=False)[0], 200)
         self.assertEqual(self.request('/api/state', auth=False)[0], 403)
         self.assertEqual(self.request('/api/state')[0], 200)
+
+    def test_routing_view_asset_is_public_only_on_the_valid_local_origin(self):
+        status,body,headers=self.request('/routing-view.js',auth=False)
+        self.assertEqual(status,200)
+        self.assertEqual(body,b'/* routing fixture */')
+        self.assertEqual(headers['Content-Type'],'text/javascript; charset=utf-8')
+        self.assertEqual(self.request('/routing-view.js',auth=False,headers={'Origin':'https://attacker.example'})[0],403)
 
     def test_host_and_origin_and_fetch_site_rejected(self):
         for headers in ({'Host': 'attacker.example'}, {'Origin': 'https://attacker.example'}, {'Sec-Fetch-Site': 'cross-site'}):

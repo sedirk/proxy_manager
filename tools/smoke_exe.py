@@ -235,7 +235,7 @@ def main():
             assert catalog['schema_version'] == 1 and isinstance(catalog['apps'], list)
             assert any(app['id'] == 'flowdesk' and app['protected'] for app in catalog['apps'])
             report['application_catalog_api'] = True
-            for name in ('index.html', 'app.js', 'guide.js', 'styles.css', 'guide.css'):
+            for name in ('index.html', 'app.js', 'routing-view.js', 'guide.js', 'styles.css', 'guide.css'):
                 with opener.open(url + '/' + name) as response:
                     assert response.read() == (ROOT / 'web' / name).read_bytes()
             report['bundled_web_assets'] = True

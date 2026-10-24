@@ -68,7 +68,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get('Sec-Fetch-Site') == 'cross-site':
             self.reply(403, {'error': '禁止跨站访问'})
             return False
-        public = self.command == 'GET' and path in ('/', '/index.html', '/app.js', '/guide.js', '/guide.css', '/styles.css', '/api/session', '/api/health')
+        public = self.command == 'GET' and path in ('/', '/index.html', '/app.js', '/routing-view.js', '/guide.js', '/guide.css', '/styles.css', '/api/session', '/api/health')
         if not public and not hmac.compare_digest(self.headers.get('X-Session-Token', ''), self.server.token):
             self.reply(403, {'error': '会话已失效，请重新打开页面'})
             return False
@@ -92,9 +92,9 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(429, {'error': '本机服务繁忙，请稍后重试'})
             return
         try:
-            if self.command == 'GET' and path in ('/', '/index.html', '/styles.css', '/app.js', '/guide.js', '/guide.css'):
+            if self.command == 'GET' and path in ('/', '/index.html', '/styles.css', '/app.js', '/routing-view.js', '/guide.js', '/guide.css'):
                 filename = 'index.html' if path == '/' else path[1:]
-                mime = {'index.html': 'text/html; charset=utf-8', 'app.js': 'text/javascript; charset=utf-8', 'guide.js': 'text/javascript; charset=utf-8', 'guide.css': 'text/css; charset=utf-8', 'styles.css': 'text/css; charset=utf-8'}[filename]
+                mime = {'index.html': 'text/html; charset=utf-8', 'app.js': 'text/javascript; charset=utf-8', 'routing-view.js': 'text/javascript; charset=utf-8', 'guide.js': 'text/javascript; charset=utf-8', 'guide.css': 'text/css; charset=utf-8', 'styles.css': 'text/css; charset=utf-8'}[filename]
                 self.reply(200, (self.server.root / 'web' / filename).read_bytes(), mime)
                 return
             value = {}
