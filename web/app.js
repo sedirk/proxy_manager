@@ -133,21 +133,64 @@
     const c=channel(state.pending.channel),destination=target(to);if(!c||!destination||destination.unavailable)return;
     state.appDraftTargets[c.app_id]=to;cancelConnection();renderGraph();renderInspector();activity(`${c.name} → ${destination.name}；点击右侧保存连接设置。`,'连接草稿');
   }
+  function appFlowSelected(id){return state.selected.kind==='channel'&&channel(state.selected.id)?.app_id===id;}
+  function appFlowMessage(id,text,error=false){
+    (state.appFlowMessages??={})[id]={text,error};
+    if(appFlowSelected(id)){const node=$('#flow-action-message');if(node){node.textContent=text;node.classList.toggle('danger-text',error);}}
+  }
+  function appFlowInspection(id){
+    const report=state.appFlowInspections?.[id];if(!report)return '<p class="field-note">检查当前软件和独立后台的代理线索，再决定怎样应用。检测本身不会启动或重启软件。</p>';
+    const labels={ok:'已确认',warning:'需要注意',unknown:'尚未确认'};
+    return `<div class="flow-inspection-result" role="status"><p class="flow-inspection-summary">${h(report.summary||'检查已返回，请核对各项结果。')}</p>${(Array.isArray(report.checks)?report.checks:[]).slice(0,20).map(check=>`<article class="flow-check flow-check-${['ok','warning','unknown'].includes(check.status)?check.status:'unknown'}"><div><strong>${h(check.label||'检查项')}</strong><span>${labels[check.status]||labels.unknown}</span></div><p>${h(check.detail||'未返回详细信息')}</p></article>`).join('')}</div>`;
+  }
   function renderAppFlowInspector(){
     const host=$('#inspector-content');$('#selection-type').textContent='应用连接';
     if(state.selected.kind==='protected'){const app=appFlowApps().find(item=>item.id===state.selected.id);host.innerHTML=`<h3>${h(app?.name||'受保护软件')}</h3><p class="field-note">当前工作连接或网络基础组件受保护，请在软件自身界面操作。</p>`;return;}
     if(state.selected.kind==='context'){const tool=state.appRoutes?.tools.find(item=>item.id===state.selected.id);host.innerHTML=tool?`<h3>${h(tool.name)}</h3><p>${h(tool.notice)}</p><p class="field-note">${h(tool.state_label)} · ${tool.listener_count} 个监听端口</p><ul>${tool.endpoints.map(item=>`<li>${h(item.transport.toUpperCase())} ${h(item.address)}:${h(item.port)} · ${h(item.owner)}</li>`).join('')}</ul>`:'<p>选择软件设置连接。</p>';return;}
     if(state.selected.kind==='target'){const item=target(state.selected.id);host.innerHTML=item?`<h3>${h(item.name)}</h3><p class="field-note">${h(item.proxy_url||'新进程连接方式')}</p><p class="field-note">点击软件的输出圆点，再点击此节点的输入圆点，最后在软件属性中保存。</p>`:'<p>入口已变化，请重新识别。</p>';return;}
     const c=channel(state.selected.id),app=c&&appFlowApps().find(item=>item.id===c.app_id),route=app&&appFlowRoute(app.id);if(!app||!route){host.innerHTML='<h3>在图中设置软件连接</h3><p class="field-note">① 从左侧添加软件<br>② 将软件右侧端口连接到代理或默认方式<br>③ 在这里保存连接设置并启动</p>';return;}
-    const saved=appFlowSaved(app.id);
-    host.innerHTML=`<div class="selected-node-heading"><span class="app-symbol">${h(app.name.slice(0,1))}</span><div><h3>${h(app.name)}</h3><p>${saved?'已保存的连接设置':'当前连线尚未保存'}</p></div></div><label class="field"><span>连接到</span><select id="flow-destination">${appFlowTargets().map(item=>`<option value="${h(item.id)}" ${item.id===appFlowTargetId(app.id)?'selected':''} ${item.unavailable?'disabled':''}>${h(item.name)}</option>`).join('')}</select></label><p class="field-note">在画布上连线与这里选择是同一设置。</p><div class="flow-application-status">${route.running?'目标正在运行；保存后用于下次从这里启动，已有进程保留原设置。':saved?'可按保存的连接方式启动该软件。':'保存后，再按设置启动目标软件。'}</div><p class="field-note">应用方式：${h(route.method)}<br>${h(route.notice)}</p><button id="flow-save" class="button button-primary full-width" ${!route.can_apply||state.appFlowBusy?'disabled':''}>保存连接设置</button><button id="flow-launch" class="button button-outline full-width" ${!route.can_apply||!saved||state.appFlowBusy?'disabled':''}>按此设置启动</button>${!route.can_apply?'<p class="field-note">尚未确认主程序路径，请使用“添加软件”选择该软件的 .exe。</p><button class="text-button" data-flow-add>选择主程序</button>':''}<p id="flow-action-message" class="field-note" role="status"></p><details class="flow-test"><summary>检测这条连接</summary><label class="field"><span>失败地址 · 可选</span><input id="flow-test-url" placeholder="https://…" autocomplete="off"></label><button id="flow-test-button" class="button button-quiet">检测入口与目标</button><p id="flow-test-result" class="field-note"></p></details><p class="field-note">${h(route.executable||'')}</p>${state.appRoutes.error?`<div class="notice danger">${h(state.appRoutes.error)}</div>`:''}`;
+    const saved=appFlowSaved(app.id),hermes=route.integration?.id==='hermes',message=state.appFlowMessages?.[app.id];
+    const status=hermes?(saved?'已保存。先检查 Hermes 窗口与独立后台；首次应用可能需要从 Hermes 菜单正常退出旧窗口，后台处理会另行预览。':'选择 Hermes 要用的连接方式并保存，再检查窗口与后台如何采用设置。'):route.running?'目标正在运行；保存后需正常退出目标，再从此处启动。':saved?'可按保存的连接方式启动该软件。':'保存后，再按设置启动目标软件。';
+    host.innerHTML=`<div class="selected-node-heading"><span class="app-symbol">${h(app.name.slice(0,1))}</span><div><h3>${h(app.name)}</h3><p>${saved?'已保存 · 实际采用情况待检查':'当前连线尚未保存'}</p></div></div><label class="field"><span>连接到</span><select id="flow-destination">${appFlowTargets().map(item=>`<option value="${h(item.id)}" ${item.id===appFlowTargetId(app.id)?'selected':''} ${item.unavailable?'disabled':''}>${h(item.name)}</option>`).join('')}</select></label><p class="field-note">在画布上连线与这里选择是同一设置。保存不会立即改变软件的连接。</p><div class="flow-application-status">${h(status)}</div>${route.integration?`<div class="flow-integration-note"><strong>${h(route.integration.label||'应用接入方式')}</strong><p>${h(route.integration.notice||'')}</p>${route.integration.id==='installer'?'<p>这是安装器，仅影响安装过程。日常连接请添加安装后的 Hermes 主程序。</p>':''}</div>`:''}<p class="field-note">应用方式：${h(route.method)}<br>${h(route.notice)}</p><button id="flow-inspect" class="button button-outline full-width" ${state.appFlowBusy?'disabled':''}>检查此软件</button><div id="flow-inspection">${appFlowInspection(app.id)}</div><button id="flow-save" class="button button-primary full-width" ${!route.can_apply||state.appFlowBusy?'disabled':''}>保存连接设置</button><button id="flow-launch" class="button button-outline full-width" ${!route.can_apply||!saved||state.appFlowBusy?'disabled':''}>${hermes?'应用并打开':'按此设置启动'}</button><button id="flow-shortcut" class="button button-outline full-width" ${!route.can_apply||!saved||state.appFlowBusy?'disabled':''}>创建桌面快捷方式</button><p class="flow-shortcut-note">以后双击桌面快捷方式，使用这里保存的设置，无需输入 Launch。${hermes?'Hermes 会复用设置一致的后台。':''}连接方式修改后，先在这里保存。</p>${!route.can_apply?'<p class="field-note">尚未确认主程序路径，请使用“添加软件”选择该软件的 .exe。</p><button class="text-button" data-flow-add>选择主程序</button>':''}<p id="flow-action-message" class="field-note ${message?.error?'danger-text':''}" role="status">${h(message?.text||'')}</p><details class="flow-test"><summary>检测这条连接</summary><label class="field"><span>失败地址 · 可选</span><input id="flow-test-url" placeholder="https://…" autocomplete="off"></label><button id="flow-test-button" class="button button-quiet">检测入口与目标</button><p id="flow-test-result" class="field-note"></p></details><p class="field-note">${h(route.executable||'')}</p>${state.appRoutes.error?`<div class="notice danger">${h(state.appRoutes.error)}</div>`:''}`;
   }
   async function appFlowAction(action){
     if(state.appFlowBusy)return;const c=channel(state.selected.id);if(!c)return;const choice=appFlowChoice(c.app_id);if(!choice)return;
-    if(action==='launch'&&!appFlowSaved(c.app_id))return toast('连线已变化，请先保存连接设置。',true);
-    state.appFlowBusy=true;const sourceId=c.app_id;renderInspector();
-    try{const result=await api('/api/app-routes/'+action,'POST',action==='save'?choice:{app_id:sourceId});state.appRoutes=result;state.appFlowSignature=JSON.stringify(result);const current=appFlowChoice(sourceId);if(current?.mode===choice.mode&&current.proxy_url===choice.proxy_url)delete state.appDraftTargets[sourceId];renderGraph();renderInspector();const node=$('#flow-action-message');if(node)node.textContent=action==='save'?'连接设置已保存。关闭目标软件后，点击“按此设置启动”。':result.launch.notice;activity(action==='save'?'应用连接设置已保存。':'已按连接设置创建目标新进程。','应用连接');}
-    catch(error){const node=$('#flow-action-message');if(node)node.textContent=error.message;toast(error.message,true);}finally{state.appFlowBusy=false;['#flow-save','#flow-launch'].forEach(selector=>{const button=$(selector);if(button)button.disabled=!appFlowRoute(sourceId)?.can_apply||(selector==='#flow-launch'&&!appFlowSaved(sourceId));});}
+    if(['launch','shortcut'].includes(action)&&!appFlowSaved(c.app_id))return toast('连线已变化，请先保存连接设置。',true);
+    const sourceId=c.app_id,signature=JSON.stringify(choice);state.appFlowBusy=true;renderInspector();
+    try{
+      if(action==='inspect'){
+        const report=await api('/api/app-routes/inspect','POST',{app_id:sourceId});(state.appFlowInspections??={})[sourceId]=report;
+        appFlowMessage(sourceId,'检查完成。请根据各项结果决定是否应用设置。');
+        if(appFlowSelected(sourceId))renderInspector();
+        return;
+      }
+      if(action==='shortcut'){
+        const result=await api('/api/app-routes/shortcut','POST',{app_id:sourceId});
+        appFlowMessage(sourceId,result.notice||'桌面快捷方式已创建。以后双击即可使用已保存的连接设置。');
+        activity('已创建应用代理快捷方式，尚未启动目标软件。','应用连接');return;
+      }
+      let payload=choice;
+      if(action==='launch'){
+        appFlowMessage(sourceId,'正在检查本次应用步骤…');
+        const prepared=await api('/api/app-routes/prepare-launch','POST',{app_id:sourceId});
+        if(prepared.can_launch!==true)throw new Error(prepared.summary||prepared.notice||'当前不能应用，请先检查此软件。');
+        if(!prepared.ticket)throw new Error('服务未返回有效的应用预览，请重新检查。');
+        if(!appFlowSelected(sourceId)||JSON.stringify(appFlowChoice(sourceId))!==signature||!appFlowSaved(sourceId))throw new Error('所选软件或连接方式已变化，请重新点击应用。');
+        if(prepared.requires_confirmation){
+          const steps=(Array.isArray(prepared.steps)?prepared.steps:[]).map((step,index)=>`${index+1}. ${step}`).join('\n');
+          if(!confirm([prepared.summary,steps,prepared.notice,'是否按以上步骤继续？'].filter(Boolean).join('\n\n'))){appFlowMessage(sourceId,'已取消，本次没有应用或重启软件。');return;}
+        }
+        if(!appFlowSelected(sourceId)||JSON.stringify(appFlowChoice(sourceId))!==signature||!appFlowSaved(sourceId))throw new Error('所选软件或连接方式已变化，请重新点击应用。');
+        payload={app_id:sourceId,ticket:prepared.ticket};appFlowMessage(sourceId,'正在应用已确认的连接设置，请稍候…');
+      }
+      const result=await api('/api/app-routes/'+action,'POST',payload);state.appRoutes=result;state.appFlowSignature=JSON.stringify(result);
+      const current=appFlowChoice(sourceId);if(current?.mode===choice.mode&&current.proxy_url===choice.proxy_url)delete state.appDraftTargets[sourceId];
+      if(state.appFlowInspections)delete state.appFlowInspections[sourceId];
+      const hermes=appFlowRoute(sourceId)?.integration?.id==='hermes';
+      appFlowMessage(sourceId,action==='save'?(hermes?'连接设置已保存。点击“应用并打开”检查并应用；旧窗口需要退出时会明确提示，后台处理会先预览。':'连接设置已保存。正常退出目标软件后，点击“按此设置启动”。'):result.launch?.notice||'应用操作已返回，请在目标软件中验证实际连接。');
+      renderGraph();renderInspector();activity(action==='save'?'应用连接设置已保存，尚未应用。':'已执行确认的应用连接操作，请在目标软件中验证。','应用连接');
+    }catch(error){appFlowMessage(sourceId,error.message,true);toast(error.message,true);}
+    finally{state.appFlowBusy=false;renderInspector();}
   }
   async function appFlowTest(){
     const c=channel(state.selected.id),choice=c&&appFlowChoice(c.app_id),url=$('#flow-test-url')?.value.trim();if(!choice||!url)return toast('填写这条连接需要访问的目标地址。',true);
@@ -537,7 +580,7 @@
   $('#catalog-profile-download').addEventListener('click',()=>{if(!state.profileResult)return;download(state.profileResult.filename||'flowdesk-launch.ps1',state.profileResult.content,state.profileResult.mime||'text/plain;charset=utf-8');toast('脚本已下载；本次没有执行或重启软件。');});
   document.addEventListener('flowdesk:add-app',()=>showCatalogAdd());
   $('#application-library').addEventListener('click',event=>{if(event.target.closest('[data-flow-add]'))showCatalogAdd();const tool=event.target.closest('[data-flow-tool]');if(tool){state.selected={kind:'context',id:tool.dataset.flowTool};renderInspector();showInspector();}});
-  $('#inspector-content').addEventListener('click',event=>{if(!state.appMode)return;if(event.target.closest('[data-flow-add]'))showCatalogAdd();if(event.target.closest('#flow-save'))appFlowAction('save');if(event.target.closest('#flow-launch'))appFlowAction('launch');if(event.target.closest('#flow-test-button'))appFlowTest();});
+  $('#inspector-content').addEventListener('click',event=>{if(!state.appMode)return;if(event.target.closest('[data-flow-add]'))showCatalogAdd();if(event.target.closest('#flow-save'))appFlowAction('save');if(event.target.closest('#flow-launch'))appFlowAction('launch');if(event.target.closest('#flow-inspect'))appFlowAction('inspect');if(event.target.closest('#flow-shortcut'))appFlowAction('shortcut');if(event.target.closest('#flow-test-button'))appFlowTest();});
   $('#inspector-content').addEventListener('change',event=>{if(state.appMode&&event.target.id==='flow-destination'){const c=channel(state.selected.id);if(c){state.appDraftTargets[c.app_id]=event.target.value;renderGraph();renderInspector();}}});
   $('#flow-mode-toggle').addEventListener('click',()=>{state.appMode=!state.appMode;$('.workbench').classList.toggle('app-flow-active',state.appMode&&state.workspace==='routing');$('.main-grid').classList.toggle('app-connection-mode',state.appMode);$('.routing-workspace').classList.toggle('app-connection-mode',state.appMode);$('#flow-mode-toggle').textContent=state.appMode?'高级中继规则':'返回应用连接';state.selected={kind:'channel',id:state.appMode?appFlowChannels()[0]?.id:state.plan.channels[0]?.id};renderAll();requestAnimationFrame(fit);if(state.appMode)appFlowLoad();});
   document.addEventListener('flowdesk:catalog-mutated',async event=>{state.appFlowSignature=null;if(state.appMode)state.appPendingAdd=event.detail?.app_id;await appFlowLoad();});

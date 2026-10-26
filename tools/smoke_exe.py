@@ -263,6 +263,13 @@ def main():
             report['electron_proxy_profiles']={'http_opt_in':True,'legacy_global_agent':True,'clear_removes_overrides':True,'target_application_not_launched':True}
             visual_saved=api('/api/app-routes/save',{'app_id':added['app_id'],'mode':'inherit'})
             assert any(route['app_id']==added['app_id'] and route['saved'] and route['mode']=='inherit' for route in visual_saved['routes'])
+            inspection=api('/api/app-routes/inspect',{'app_id':added['app_id']})
+            assert inspection['application']['running'] is False
+            assert isinstance(inspection['checks'],list) and inspection['checks']
+            launch_preview=api('/api/app-routes/prepare-launch',{'app_id':added['app_id']})
+            assert launch_preview['can_launch'] and launch_preview['ticket']
+            assert not launch_preview['requires_confirmation']
+            report['application_launch_review']={'inspect':True,'preview_only':True,'target_application_not_launched':True}
             assert not api('/api/state')['runtime']['running']
             duplicate = api('/api/catalog/apps', {'name': '手动清单验收', 'executable': str(manual_executable)})
             assert duplicate['duplicate'] is True

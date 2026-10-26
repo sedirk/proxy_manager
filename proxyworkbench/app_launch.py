@@ -12,6 +12,7 @@ from .catalog import application_executable_path, _PROTECTED_EXES
 from .proxy_environment import child_environment
 
 _LOCK = threading.Lock()
+_DLL_LOCK = threading.RLock()
 
 
 @contextmanager
@@ -21,24 +22,26 @@ def _external_libraries():
     if os.name != 'nt' or not getattr(sys, 'frozen', False):
         yield
         return
-    from ctypes import wintypes
-    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
-    kernel.GetDllDirectoryW.argtypes = [wintypes.DWORD, wintypes.LPWSTR]
-    kernel.GetDllDirectoryW.restype = wintypes.DWORD
-    kernel.SetDllDirectoryW.argtypes = [wintypes.LPCWSTR]
-    kernel.SetDllDirectoryW.restype = wintypes.BOOL
-    length = kernel.GetDllDirectoryW(0, None)
-    buffer = ctypes.create_unicode_buffer(length + 1)
-    if length:
-        kernel.GetDllDirectoryW(len(buffer), buffer)
-    previous = buffer.value or None
-    if not kernel.SetDllDirectoryW(None):
-        raise OSError('Could not restore child DLL search path')
-    try:
-        yield
-    finally:
-        if not kernel.SetDllDirectoryW(previous):
-            raise OSError('Could not restore workbench DLL search path')
+    # SetDllDirectory is process-wide, including callers outside launch().
+    with _DLL_LOCK:
+        from ctypes import wintypes
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.GetDllDirectoryW.argtypes = [wintypes.DWORD, wintypes.LPWSTR]
+        kernel.GetDllDirectoryW.restype = wintypes.DWORD
+        kernel.SetDllDirectoryW.argtypes = [wintypes.LPCWSTR]
+        kernel.SetDllDirectoryW.restype = wintypes.BOOL
+        length = kernel.GetDllDirectoryW(0, None)
+        buffer = ctypes.create_unicode_buffer(length + 1)
+        if length:
+            kernel.GetDllDirectoryW(len(buffer), buffer)
+        previous = buffer.value or None
+        if not kernel.SetDllDirectoryW(None):
+            raise OSError('Could not restore child DLL search path')
+        try:
+            yield
+        finally:
+            if not kernel.SetDllDirectoryW(previous):
+                raise OSError('Could not restore workbench DLL search path')
 
 
 def _running_images():
@@ -65,7 +68,7 @@ def _running_images():
     return records if isinstance(records, list) else [records]
 
 
-def launch(executable, proxy_url='', mode='http_environment'):
+def launch(executable, proxy_url='', mode='http_environment', *, environment=None):
     if not _LOCK.acquire(blocking=False):
         raise RuntimeError('另一项启动正在进行，请等待结果')
     try:
@@ -85,7 +88,7 @@ def launch(executable, proxy_url='', mode='http_environment'):
         if mode == 'http_environment' and (parsed.scheme != 'http' or not parsed.hostname or not ipaddress.ip_address(parsed.hostname).is_loopback
                 or not parsed.port or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment):
             raise ValueError('启动方案的本机代理入口无效，请重新检测。')
-        environment = child_environment(os.environ, mode, proxy_url)
+        environment = dict(environment) if environment is not None else child_environment(os.environ, mode, proxy_url)
         arguments = []
         browser = Path(executable).name.casefold() in {'chrome.exe', 'msedge.exe'}
         if mode == 'http_environment':

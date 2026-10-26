@@ -404,6 +404,13 @@ class Catalog:
 
     def _build(self):
         known = {str(app['id']): dict(app) for app in self.snapshot.get('apps', []) if isinstance(app, dict) and app.get('id')}
+        if self.snapshot.get('platform') == 'windows':
+            from .hermes_adapter import default_desktop
+            desktop = default_desktop({k: str(v) for k, v in self.roots.items()})
+            if desktop:
+                known.setdefault('hermes', {'id': 'hermes', 'name': 'Hermes', 'category': 'application',
+                                            'running_processes': [], 'installed_locations': []})
+                known['hermes']['_installed_main'] = desktop
         groups = {}
         for process in self.snapshot.get('network_processes', [])[:512]:
             if not isinstance(process, dict):
@@ -450,6 +457,17 @@ class Catalog:
             manual = original.get('_manual_record')
             capability_id = original.get('_capability_id') or app_id
             executable, resource_base, helpers_only = _application_executable(capability_id, processes)
+            if not executable and original.get('_installed_main'):
+                executable = original['_installed_main']
+                resource_base, helpers_only = Path(executable).parent, False
+            if capability_id == 'hermes' and not manual:
+                from .hermes_adapter import installation
+                desktop = next((entry.get('executable') for entry in processes
+                                if entry.get('executable') and installation(entry['executable'])), None)
+                desktop = desktop or original.get('_installed_main')
+                executable = desktop
+                resource_base = Path(desktop).parent if desktop else resource_base
+                helpers_only = not bool(desktop)
             if manual:
                 selected = manual['executable']
                 main_names = _MAIN_EXES.get(capability_id)

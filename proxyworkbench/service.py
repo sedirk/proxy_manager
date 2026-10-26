@@ -97,6 +97,8 @@ class Service:
         self.guide_slots = threading.BoundedSemaphore(1)
         self.guide_checks = {}
         self.route_sessions = {}
+        from .app_connections import LaunchReviews
+        self.launch_reviews = LaunchReviews(self.root)
         self.custom_apps_error = None
         from .catalog import manual_apps_document
         try:
@@ -287,9 +289,13 @@ class Service:
 
     def _app_route(self, value):
         from .app_routes import proxy_url, MODES
+        from .hermes_adapter import describe as integration_for
         app=self._catalog()._apps.get(value.get('app_id'))
         if not app or app['protected'] or not app['launch_profile']['available']:
             raise ValueError('请先为该软件选择准确主程序；受保护组件不能在此重配')
+        integration=integration_for(app['launch_profile']['executable'])
+        if integration and integration['id']=='hermes_unsupported':
+            raise ValueError(integration['notice'])
         mode=value.get('mode')
         if mode not in MODES:raise ValueError('请选择支持的连接方式')
         endpoint=proxy_url(value.get('proxy_url')) if mode=='http_environment' else ''
@@ -302,6 +308,7 @@ class Service:
     def app_route_save(self, value):
         from .app_routes import parse,route_key
         from .catalog import application_executable_path
+        from .app_connections import launch_lock
         with self.lock:
             self._ensure_open()
             app,mode,endpoint=self._app_route(value)
@@ -311,7 +318,8 @@ class Service:
             document['routes']=[record for record in document['routes'] if record['key']!=key]
             document['routes'].append({'key':key,'executable':executable,'mode':mode,'proxy_url':endpoint,'updated_at':now()})
             if len(document['routes'])>256:raise ValueError('最多保存 256 个软件的连接设置')
-            self.store.write('app-routes.json',document)
+            with launch_lock(self.root, key):
+                self.store.write('app-routes.json',document)
             self.route_sessions.pop(key,None)
             self.audit('保存可视化应用连接设置',{'app_id':app['id'],'mode':mode,'proxy_url':endpoint})
             return self.app_routes_state()
@@ -328,13 +336,52 @@ class Service:
             record=next((item for item in records if executable and item['key']==route_key(executable)),None)
             if not record:raise ValueError('请先保存该软件的连接设置')
             app,mode,endpoint=self._app_route({'app_id':app['id'],**record})
-        result=launch(executable,endpoint,mode)
+        from .hermes_adapter import installation
+        if value.get('ticket'):
+            result=self.launch_reviews.apply(record,value['ticket'])
+        elif installation(executable):
+            raise ValueError('请先预览 Hermes 后台的应用步骤，再确认执行。')
+        else:
+            result=launch(executable,endpoint,mode)
         with self.lock:
             current=next((item for item in parse(self.store.read('app-routes.json',{'schema_version':1,'routes':[]}))['routes'] if item['key']==record['key']),None)
             if current and current['mode']==mode and current['proxy_url']==endpoint:
                 self.route_sessions[record['key']]={'pid':result['pid'],'started_at':now(),'mode':mode,'proxy_url':endpoint}
             self.audit('从可视化设置启动目标软件',{'app_id':app['id'],'pid':result['pid'],'mode':mode})
             return {'launch':result,**self.app_routes_state()}
+
+    def _saved_app_record(self, value, *, required=True):
+        from .app_routes import parse, route_key
+        with self.lock:
+            self._ensure_open()
+            app = self._catalog()._apps.get(value.get('app_id'))
+            if not app or app.get('protected') or not app.get('launch_profile', {}).get('available'):
+                raise ValueError('请选择准确的应用主程序；受保护组件不能在此操作。')
+            executable = app['launch_profile']['executable']
+            records = parse(self.store.read('app-routes.json', {'schema_version': 1, 'routes': []}))['routes']
+            record = next((r for r in records if r['key'] == route_key(executable)), None)
+            if required and record is None:
+                raise ValueError('请先保存该软件的连接设置。')
+            return app, record or {'key': route_key(executable), 'executable': executable,
+                                   'mode': 'inherit', 'proxy_url': '', 'updated_at': ''}
+
+    def app_route_inspect(self, value):
+        from .app_connections import inspect, public_check
+        _, record = self._saved_app_record(value, required=False)
+        return public_check(inspect(record))
+
+    def app_route_prepare(self, value):
+        app, record = self._saved_app_record(value)
+        with self.lock:
+            self._app_route({'app_id': app['id'], **record})
+        return self.launch_reviews.prepare(record)
+
+    def app_route_shortcut(self, value):
+        from .app_shortcuts import create
+        app, record = self._saved_app_record(value)
+        result = create(self.root, record, app['name'])
+        self.audit('创建应用桌面快捷方式（未启动）', {'app_id': app['id'], 'mode': record['mode']})
+        return result
 
     def guide_check(self, value):
         from .troubleshoot import diagnose, problem_url

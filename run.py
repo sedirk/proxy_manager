@@ -21,12 +21,17 @@ def main(argv=None):
     parser.add_argument('--no-discovery', action='store_true', help='仅供隔离测试')
     parser.add_argument('--data-root', help='自定义持久数据根目录；数据保存在其 .local 子目录')
     parser.add_argument('--guardian', nargs=2, metavar=('JOURNAL', 'LEASE_ID'), help=argparse.SUPPRESS)
+    parser.add_argument('--launch-app', metavar='SAVED_KEY', help='使用已保存的应用连接设置启动')
     args = parser.parse_args(argv)
     if args.guardian:
         from proxyworkbench.guardian import watch
         watch(*args.guardian)
         return
     root = data_root(args.data_root)
+    if args.launch_app:
+        from proxyworkbench.app_shortcuts import launch_saved
+        launch_saved(root, args.launch_app)
+        return
     local = root / '.local'
     local.mkdir(parents=True, exist_ok=True)
     # OS byte lock closes with the process, unlike a stale PID file.

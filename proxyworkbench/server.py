@@ -130,6 +130,12 @@ class Handler(BaseHTTPRequestHandler):
                 result = service.app_route_save(value)
             elif key == ('POST', '/api/app-routes/launch'):
                 result = service.app_route_launch(value)
+            elif key == ('POST', '/api/app-routes/inspect'):
+                result = service.app_route_inspect(value)
+            elif key == ('POST', '/api/app-routes/prepare-launch'):
+                result = service.app_route_prepare(value)
+            elif key == ('POST', '/api/app-routes/shortcut'):
+                result = service.app_route_shortcut(value)
             elif key == ('POST', '/api/troubleshoot/check'):
                 result = service.guide_check(value)
             elif key == ('POST', '/api/troubleshoot/profile'):

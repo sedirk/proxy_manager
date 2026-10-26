@@ -43,6 +43,7 @@ _APP_SPECS = {
     "zerotier": ("ZeroTier", {"zerotier-one_x64.exe", "zerotier-one_x86.exe", "zerotier-one.exe", "zerotier_desktop_ui.exe"}, ("zerotier",)),
     "codex": ("Codex", {"codex.exe", "codex-app-server.exe", "app-server.exe"}, ("openai codex", "codex")),
     "steam": ("Steam", {"steam.exe", "steamwebhelper.exe", "steamservice.exe"}, ("steam",)),
+    "hermes": ("Hermes", {"hermes.exe"}, ("hermes agent",)),
     "wgc": ("Wargaming Game Center", {"wgc.exe", "wgc_renderer_host.exe"}, ("wargaming.net game center", "wargaming game center")),
     "rustdesk": ("RustDesk", {"rustdesk.exe"}, ("rustdesk",)),
     "chrome": ("Chrome", {"chrome.exe"}, ("google chrome",)),
