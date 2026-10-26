@@ -47,6 +47,9 @@ def inventory(apps, endpoints, interfaces, wininet, services=()):
     owners = {}
     for pid, (app_id, process) in processes.items():
         selected, parent, visited = app_id, process.get('parent_pid'), {pid}
+        if app_id not in PROXIES:
+            owners[pid] = app_id
+            continue
         for _ in range(6):
             if parent not in processes or parent in visited:
                 break
@@ -101,7 +104,7 @@ def inventory(apps, endpoints, interfaces, wininet, services=()):
         tool['running'] = True  # A live listener is itself a running-process observation.
         if endpoint.get('pid') and not any(item['pid'] == endpoint['pid'] for item in tool['processes']):
             tool['processes'].append({'pid': endpoint['pid'], 'name': endpoint.get('owner')})
-        entry = {key: endpoint.get(key) for key in ('id', 'address', 'port', 'transport', 'owner', 'pid')}
+        entry = {key: endpoint.get(key) for key in ('id', 'address', 'port', 'transport', 'owner', 'pid', 'app_id')}
         protocol = endpoint.get('declared_protocol')
         host = _local(endpoint.get('address'))
         configured_system = (host, endpoint.get('port')) in system

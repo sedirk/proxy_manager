@@ -97,6 +97,8 @@ class Service:
         self.guide_slots = threading.BoundedSemaphore(1)
         self.guide_checks = {}
         self.route_sessions = {}
+        self.network_check_lock = threading.Lock()
+        self.verified_proxy_entrances = []
         from .app_connections import LaunchReviews
         self.launch_reviews = LaunchReviews(self.root)
         self.custom_apps_error = None
@@ -265,7 +267,7 @@ class Service:
 
     def guide_state(self):
         with self.lock:
-            return {'catalog': self.catalog_state(), 'tools': copy.deepcopy(self.snapshot.get('network_tools', [])),
+            return {'catalog': self.catalog_state(), 'tools': self._network_tools(),
                     'snapshot_captured_at': self.snapshot.get('captured_at'), 'snapshot_stale': self.snapshot_stale,
                     'discovering': self.discovering, 'discovery_error': self.discovery_error}
 
@@ -284,8 +286,57 @@ class Service:
                 item=describe(app,by_key.get(route_key(executable)) if executable else None)
                 item['session']=self.route_sessions.get(item['key'])
                 routes.append(item)
-            return {'catalog':catalog,'routes':routes,'tools':copy.deepcopy(self.snapshot.get('network_tools',[])),
+            return {'catalog':catalog,'routes':routes,'tools':self._network_tools(),
                     'error':error,'snapshot_captured_at':self.snapshot.get('captured_at')}
+
+    def _network_tools(self):
+        from .proxy_check import decorate
+        return decorate(self.snapshot.get('network_tools', []), self.verified_proxy_entrances,
+                        deny_ports=(self.control_port,))
+
+    def network_tool_check(self, value):
+        from .proxy_check import candidates, check, identity
+        tool_id = value.get('tool_id')
+        with self.lock:
+            self._ensure_open()
+            tool = next((item for item in self._network_tools() if item.get('id') == tool_id), None)
+            if not tool or not tool['can_check_http']:
+                raise ValueError('请选择有本机监听的应用代理；加速器、组网管理端口不能作为 HTTP 入口检测。')
+        if not self.network_check_lock.acquire(blocking=False):
+            raise ValueError('另一项代理入口检测正在进行，请等待结果。')
+        try:
+            scan = self.discover()
+            if scan.get('discovering') or scan.get('error'):
+                raise ValueError('本机监听信息尚未刷新，请等待自动检测完成后重试。')
+            with self.lock:
+                self._ensure_open()
+                tool = next((item for item in self._network_tools() if item.get('id') == tool_id), None)
+                if not tool or not tool['can_check_http']:
+                    raise ValueError('该代理监听已变化，请查看最新检测结果。')
+                old_keys = {identity(item) for item in candidates(tool, (self.control_port,))}
+                # A failed recheck must not leave this session's earlier green proof.
+                self.verified_proxy_entrances = [item for item in self.verified_proxy_entrances if identity(item) not in old_keys]
+            passed, checks = check(tool, deny_ports=(self.control_port,))
+            scan = self.discover()
+            if scan.get('discovering') or scan.get('error'):
+                raise ValueError('检测后未能重新核对监听归属，暂不添加入口，请重试。')
+            with self.lock:
+                self._ensure_open()
+                fresh = next((item for item in self._network_tools() if item.get('id') == tool_id), {})
+                current = {identity(item) for item in candidates(fresh, (self.control_port,))}
+                accepted = [item for item in passed if identity(item) in current]
+                self.verified_proxy_entrances = [item for item in self.verified_proxy_entrances if identity(item) not in old_keys] + accepted
+                # Keep only current listener identities and bound retained evidence.
+                active = {identity(item) for tool in self.snapshot.get('network_tools', []) for item in candidates(tool, (self.control_port,))}
+                self.verified_proxy_entrances = [item for item in self.verified_proxy_entrances if identity(item) in active][-64:]
+                if len(accepted) != len(passed):
+                    checks.append({'label': '监听归属复核', 'status': 'warning', 'detail': '检测期间进程或监听发生变化，相关入口未添加，请重新检测。'})
+                summary = (f'已确认 {len(accepted)} 个 HTTP 代理入口，已显示到画布。连接软件并保存后才会应用。'
+                           if accepted else '尚未确认 HTTP 代理入口。请在代理软件中核对 HTTP/混合端口；仅有 SOCKS 端口时不能直接用于这里。')
+                self.audit('检测本机 HTTP 代理入口', {'tool_id': tool_id, 'confirmed': len(accepted)})
+                return {'summary': summary, 'checks': checks, 'app_routes': self.app_routes_state()}
+        finally:
+            self.network_check_lock.release()
 
     def _app_route(self, value):
         from .app_routes import proxy_url, MODES
@@ -300,7 +351,7 @@ class Service:
         if mode not in MODES:raise ValueError('请选择支持的连接方式')
         endpoint=proxy_url(value.get('proxy_url')) if mode=='http_environment' else ''
         if endpoint:
-            allowed=[option['proxy_url'] for tool in self.snapshot.get('network_tools',[]) for option in tool['proxy_options'] if option['protocol']=='http']
+            allowed=[option['proxy_url'] for tool in self._network_tools() for option in tool['proxy_options'] if option['protocol']=='http']
             allowed += [item['proxy_url'] for item in self.relay.status()['channels'] if item.get('proxy_url')]
             if endpoint not in allowed:raise ValueError('该代理入口已变化或尚未被识别，请重新检测后连线')
         return app,mode,endpoint

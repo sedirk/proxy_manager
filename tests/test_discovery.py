@@ -146,6 +146,50 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(config["reference"], "command_line_relative_cwd_unknown")
         self.assertFalse(config["loaded_config_verified"])
 
+    def test_relative_v2rayn_generated_config_supports_external_data_bin_layout(self):
+        data_root = self.root / "external-data" / "v2rayN"
+        for name, folder, filename in (("xray.exe", "xray", "config.json"),
+                                       ("sing-box.exe", "sing_box", "configPre.json"),
+                                       ("xray.exe", "xray", "configTest-123456789.json"),
+                                       ("v2ray.exe", "v2fly_v5", "config.json")):
+            with self.subTest(name=name, filename=filename):
+                raw = deepcopy(self.raw)
+                executable = data_root / "bin" / folder / name
+                generated = data_root / "binConfigs" / filename
+                generated.parent.mkdir(parents=True, exist_ok=True)
+                generated.write_bytes(self.config.read_bytes())
+                raw["wininet"]["enabled"] = 0
+                raw["processes"][0].update(Name=name, ExecutablePath=str(executable))
+                raw["core_commands"][0].update(Name=name, ExecutablePath=str(executable),
+                    CommandLine=f'"{executable}" run -c {filename}')
+                result = self.snapshot(raw)
+                config = next(item for item in result["layers"]["core_configs"]
+                              if item.get("path") == str(generated))
+                self.assertEqual(config["evidence_status"], "observed")
+                self.assertEqual(config["reference"], "command_line_relative_cwd_unknown")
+                self.assertFalse(config["loaded_config_verified"])
+                manager = next(tool for tool in result["network_tools"] if tool["id"] == "v2rayn")
+                self.assertEqual(manager["proxy_options"][0]["protocol"], "http")
+                self.assertNotIn("PRIVATE_NODE_ADDRESS", json.dumps(result))
+
+    def test_external_data_candidates_require_observed_parent_layout_and_generated_basename(self):
+        data_root = self.root / "external-data" / "v2rayN"
+        executable = data_root / "bin" / "xray" / "xray.exe"
+        parent = {"Name": "v2rayN.exe", "ExecutablePath": str(self.root / "v2rayN.exe")}
+        for label, core_path, filename, observed_parent in (
+                ("unknown parent", executable, "config.json", {"Name": "other.exe"}),
+                ("missing parent", executable, "config.json", {}),
+                ("wrong bin layout", data_root / "custom" / "xray" / "xray.exe", "config.json", parent),
+                ("wrong core folder", data_root / "bin" / "other" / "xray.exe", "config.json", parent),
+                ("gui config", executable, "guiNConfig.json", parent),
+                ("subscription", executable, "subscriptions.json", parent),
+                ("nested relative path", executable, "nested/config.json", parent)):
+            with self.subTest(label=label):
+                process = {"Name": "xray.exe", "ProcessId": 10, "ExecutablePath": str(core_path),
+                           "CommandLine": f'"{core_path}" run -c {filename}'}
+                candidates = discovery._config_candidates(process, {10: observed_parent})
+                self.assertNotIn(data_root / "binConfigs" / filename, [path for path, _ in candidates])
+
     def test_non_local_config_reference_is_not_fetched(self):
         raw = deepcopy(self.raw)
         raw["core_commands"][0]["CommandLine"] = 'xray.exe -c https://subscription.example/PRIVATE_TOKEN'

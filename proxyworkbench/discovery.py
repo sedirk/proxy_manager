@@ -286,6 +286,25 @@ def _argv(command):
     return [value.strip('"') for value in shlex.split(str(command), posix=False)]
 
 
+def _v2rayn_generated_config_base(process, parent, path):
+    # v2rayN's LocalAppData mode separates the GUI from its data-root/bin/core.
+    # Only its named generated file and observed direct child core qualify;
+    # neither GUI settings nor subscription directories are fallback inputs.
+    executable = Path(process.get("ExecutablePath") or "")
+    name = str(process.get("Name", "")).casefold()
+    folders = {"xray.exe": {"xray"}, "sing-box.exe": {"sing_box"},
+               "singbox.exe": {"sing_box"}, "v2ray.exe": {"v2fly", "v2fly_v5"}}
+    if (not executable.is_absolute() or str(executable).startswith(("\\\\", "//"))
+            or len(executable.parents) < 3 or executable.name.casefold() != name
+            or _app_id(parent.get("Name"), parent.get("ExecutablePath")) != "v2rayn"
+            or len(path.parts) != 1
+            or not re.fullmatch(r"(?:config|configPre|configTest-?\d+)\.json", path.name, re.I)
+            or executable.parent.parent.name.casefold() != "bin"
+            or executable.parent.name.casefold() not in folders.get(name, ())):
+        return None
+    return executable.parents[2] / "binConfigs"
+
+
 def _config_candidates(process, parents):
     arguments = _argv(process.get("CommandLine", ""))
     name = str(process.get("Name", "")).lower()
@@ -319,6 +338,10 @@ def _config_candidates(process, parents):
                 # that CIM supplied the running process current directory.
                 bases.extend(Path(parent["ExecutablePath"]).parent / folder
                              for folder in ("binConfigs", "guiConfigs", "configs"))
+        if not path.is_absolute() and not directory:
+            data_configs = _v2rayn_generated_config_base(process, parent, path)
+            if data_configs is not None:
+                bases.append(data_configs)
         for base in bases:
             candidate = path if base is None else base / path
             reference = "command_line_absolute" if base is None else "command_line_relative_cwd_unknown"

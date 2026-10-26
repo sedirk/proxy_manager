@@ -270,6 +270,12 @@ def main():
             assert launch_preview['can_launch'] and launch_preview['ticket']
             assert not launch_preview['requires_confirmation']
             report['application_launch_review']={'inspect':True,'preview_only':True,'target_application_not_launched':True}
+            try:
+                api('/api/network-tools/check', {'tool_id': 'unobserved-fixture', 'port': origin.server_port})
+                raise AssertionError('Unobserved listener must not be probed')
+            except urllib.error.HTTPError as error:
+                assert error.code == 400
+            report['network_tool_check_guard'] = {'api_available': True, 'unobserved_target_refused': True}
             assert not api('/api/state')['runtime']['running']
             duplicate = api('/api/catalog/apps', {'name': '手动清单验收', 'executable': str(manual_executable)})
             assert duplicate['duplicate'] is True
@@ -319,6 +325,10 @@ def main():
             assert observed['capabilities']['sections']['processes']['status'] == 'observed', observed['capabilities']['errors']
             report['read_only_discovery'] = {'windows': True, 'processes': True, 'wininet': True}
             catalog = api('/api/catalog')
+            tools = api('/api/app-routes')['tools']
+            assert all(isinstance(tool.get('can_check_http'), bool) for tool in tools)
+            assert all(not tool['can_check_http'] for tool in tools if tool['id'] in {'uu', 'atrust', 'zerotier'})
+            report['network_tool_check_guard']['private_tool_ports_refused'] = True
             assert any(app.get('manual_id') == manual_id for app in catalog['apps'])
             removed = api('/api/catalog/apps/remove', {'manual_id': manual_id})
             assert not any(app.get('manual_id') == manual_id for app in removed['catalog']['apps'])

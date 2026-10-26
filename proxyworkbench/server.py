@@ -136,6 +136,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = service.app_route_prepare(value)
             elif key == ('POST', '/api/app-routes/shortcut'):
                 result = service.app_route_shortcut(value)
+            elif key == ('POST', '/api/network-tools/check'):
+                result = service.network_tool_check(value)
             elif key == ('POST', '/api/troubleshoot/check'):
                 result = service.guide_check(value)
             elif key == ('POST', '/api/troubleshoot/profile'):
