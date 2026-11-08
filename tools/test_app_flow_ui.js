@@ -3,22 +3,24 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),path=require('node:path'),crypto=require('node:crypto');
 const root=path.resolve(__dirname,'..'),product=fs.readFileSync(path.join(root,'web/app.js'),'utf8');
 const begin=product.indexOf('  const appFlowApps'),end=product.indexOf('  function renderLibrary',begin);
-assert(begin>0&&end>begin);const source=product.slice(begin,end),nodes=new Map(),calls=[],passed=[],confirmations=[],frames=[];
-const node=selector=>{if(!nodes.has(selector))nodes.set(selector,{innerHTML:'',textContent:'',value:'',hidden:false,disabled:false,scrollTop:0,style:{},classList:{add(){},toggle(){}},setAttribute(){}});return nodes.get(selector);};
+assert(begin>0&&end>begin);const source=product.slice(begin,end),nodes=new Map(),calls=[],passed=[],confirmations=[],frames=[],persisted=[];
+const node=selector=>{if(!nodes.has(selector)){const classes=new Set();nodes.set(selector,{innerHTML:'',textContent:'',value:'',hidden:false,disabled:false,scrollTop:0,style:{},attributes:{},classList:{add(...names){names.forEach(name=>classes.add(name));},remove(...names){names.forEach(name=>classes.delete(name));},contains(name){return classes.has(name);},toggle(name,force){const added=force??!classes.has(name);added?classes.add(name):classes.delete(name);return added;}},setAttribute(key,value){this.attributes[key]=value;},focus(){this.focused=true;}});}return nodes.get(selector);};
 const seed={catalog:{apps:[{id:'setup',name:'Hermes <fixture>',category:'application',protected:false,running_processes:[]},{id:'codex',name:'Codex',category:'application',protected:true,running_processes:[]}]},routes:[{app_id:'setup',saved:false,mode:'inherit',proxy_url:'',can_apply:true,method:'新进程环境',notice:'应用需要支持',executable:'C:\\Fixture\\Hermes.exe',running:false}],tools:[{id:'v2rayn',name:'v2rayN',state_label:'运行中',proxy_options:[{protocol:'http',proxy_url:'http://127.0.0.1:10808',host:'127.0.0.1',port:10808}],endpoints:[]},{id:'uu',name:'UU',state_label:'运行中',kind:'加速器',proxy_options:[],listener_count:1,endpoints:[{transport:'tcp',port:60443}]}]};
 const state={appMode:true,workspace:'routing',appRoutes:JSON.parse(JSON.stringify(seed)),runtime:{channels:[]},appScene:['setup'],appDraftTargets:{},appLayout:{},selected:{kind:'channel',id:'flow:setup'},plan:{name:'Existing relay plan',targets:[{id:'direct',type:'direct'}],channels:[{id:'legacy',default_target:'direct'}]},pending:null,appFlowBusy:false,connected:true,appFlowLoading:false,focusMode:true};
-const baseline=JSON.stringify(state.plan);let pendingSave=null,pendingInspect=null,pendingPrepare=null,confirmResult=true,pendingToolCheck=null,toolCheckResult=null,prepareResult={ticket:'fixture-ticket',can_launch:true,requires_confirmation:false,summary:'Ready',steps:[],notice:''};const failures=new Map();
+const baseline=JSON.stringify(state.plan);let pendingSave=null,pendingInspect=null,pendingPrepare=null,confirmResult=true,pendingToolCheck=null,toolCheckResult=null,pendingWorkflow=null,workflowOverride=null,prepareResult={ticket:'fixture-ticket',can_launch:true,requires_confirmation:false,summary:'Ready',steps:[],notice:''};const failures=new Map();
 Object.assign(node('#graph-viewport'),{clientWidth:900,clientHeight:600,getBoundingClientRect:()=>({left:10,top:20})});
-const context={state,document:{activeElement:{closest:()=>null}},$:node,$$:()=>[],h:value=>String(value??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'),icon:()=>'',pointer:null,
-  localStorage:{setItem(){}},requestAnimationFrame:callback=>frames.push(callback),fit(){},applyView(){},requestEdges(){},isSelected:()=>false,
+const context={state,innerWidth:1366,document:{activeElement:{closest:()=>null}},$:node,$$:()=>[],h:value=>String(value??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'),icon:()=>'',pointer:null,
+  localStorage:{setItem(key,value){persisted.push({key,value});}},requestAnimationFrame:callback=>frames.push(callback),fit(){},applyView(){},requestEdges(){},isSelected:()=>false,
   cancelConnection:()=>{state.pending=null;},renderGraph(){context.renderAppFlowGraph();},renderInspector(){context.renderAppFlowInspector();},renderLibrary(){context.renderAppFlowLibrary();},showInspector(){},activity(){},toast(){},
-  confirm(message){confirmations.push(message);return confirmResult;},
+  confirm(message){confirmations.push(message);return confirmResult;},switchWorkspace(name){state.workspace=name;},
   api:async(endpoint,method='GET',body)=>{calls.push({endpoint,method,body:body&&JSON.parse(JSON.stringify(body))});
     const failure=failures.get(endpoint);if(failure)throw new Error(failure);
     if(endpoint==='/api/network-tools/check')return pendingToolCheck||JSON.parse(JSON.stringify(toolCheckResult));
     if(endpoint==='/api/app-routes')return JSON.parse(JSON.stringify(state.appRoutes));
     if(endpoint.endsWith('/save')){if(pendingSave)return pendingSave;const result=JSON.parse(JSON.stringify(state.appRoutes));Object.assign(result.routes.find(item=>item.app_id===body.app_id),body,{saved:true});return result;}
     if(endpoint.endsWith('/inspect'))return pendingInspect||{summary:'检查软件 <fixture>',checks:[{label:'后台代理',status:'warning',detail:'未设置 HTTPS_PROXY'}],backend:{state:'running',pid:456}};
+    if(endpoint.endsWith('/diagnose')||endpoint.endsWith('/verify'))return pendingWorkflow||JSON.parse(JSON.stringify(workflowOverride||{check_id:'check-'+calls.length,app_id:body.app_id,stage:endpoint.endsWith('/diagnose')?'diagnose':'verify',captured_at:'2026-11-08T01:02:03Z',inspection:{summary:'软件检查完成',checks:[{label:'进程环境',status:'ok',detail:'与保存设置一致'}]},comparison:body.url?{results:[{name:'普通连接',ok:false,label:'TLS 未通过'},{name:'代理 <fixture>',ok:true,label:'HTTP 200'}],scope:'只证明工作台请求'}:null,recommendation:endpoint.endsWith('/diagnose')&&body.url?{mode:'http_environment',proxy_url:'http://127.0.0.1:10808'}:null,summary:'请核对下一步 <fixture>',next_steps:['在原软件重试'],application_result:{status:'unverified',source:'none'},saved:true}));
+    if(endpoint.endsWith('/feedback'))return {check_id:body.check_id,application_result:{status:body.outcome,source:'user_report'},message:'已记录原软件反馈'};
     if(endpoint.endsWith('/shortcut'))return {notice:'桌面快捷方式已创建；目标尚未启动。',path:'C:\\Fixture\\Desktop\\Hermes.lnk'};
     if(endpoint.endsWith('/prepare-launch'))return pendingPrepare||JSON.parse(JSON.stringify(prepareResult));
     if(endpoint.endsWith('/launch'))return {...JSON.parse(JSON.stringify(state.appRoutes)),launch:{pid:123,notice:'fixture launch'}};
@@ -41,14 +43,14 @@ function selectedSetup(){state.selected={kind:'channel',id:'flow:setup'};}
   });
   await check('Inspector offers software checks and shortcut with explicit saved-versus-applied wording',async()=>{
     context.renderAppFlowGraph();assert(node('#node-layer').innerHTML.includes('v2rayN'));assert(node('#node-layer').innerHTML.includes('Hermes &lt;fixture&gt;'));
-    context.renderAppFlowInspector();const html=node('#inspector-content').innerHTML;assert(html.includes('保存连接设置'));assert(html.includes('按此设置启动'));assert(html.includes('检查此软件'));assert(html.includes('创建桌面快捷方式'));assert(html.includes('保存不会立即改变软件的连接'));
+    context.renderAppFlowInspector();const html=node('#inspector-content').innerHTML;assert(html.includes('保存连接设置'));assert(html.includes('预览应用步骤'));assert(html.includes('检查此软件'));assert(html.includes('创建桌面快捷方式'));assert(html.includes('保存不会立即改变软件的连接'));
   });
   await check('Save persists only the selected connection and never starts software',async()=>{
     await context.appFlowAction('save');assert.equal(calls.at(-1).endpoint,'/api/app-routes/save');assert.deepEqual(calls.at(-1).body,{app_id:'setup',mode:'http_environment',proxy_url:'http://127.0.0.1:10808'});
     assert.equal(call('appFlowSaved("setup")'),true);assert.equal(launchCalls(),0);
   });
   await check('Launch first prepares, then uses only the issued ticket and app identity',async()=>{
-    const start=calls.length;await context.appFlowAction('launch');assert.deepEqual(calls.slice(start).map(item=>item.endpoint),['/api/app-routes/prepare-launch','/api/app-routes/launch']);assert.deepEqual(calls.at(-1).body,{app_id:'setup',ticket:'fixture-ticket'});
+    const start=calls.length,before=launchCalls();await context.appFlowAction('launch');assert.equal(launchCalls(),before);assert(node('#inspector-content').innerHTML.includes('确认并应用'));await context.appFlowAction('apply');assert.deepEqual(calls.slice(start).map(item=>item.endpoint),['/api/app-routes/prepare-launch','/api/app-routes/launch']);assert.deepEqual(calls.at(-1).body,{app_id:'setup',ticket:'fixture-ticket'});
   });
   await check('Software check displays escaped structured evidence without save, launch or restart',async()=>{
     const start=calls.length;await context.appFlowAction('inspect');assert.deepEqual(calls.slice(start).map(item=>item.endpoint),['/api/app-routes/inspect']);const html=node('#inspector-content').innerHTML;assert(html.includes('检查软件 &lt;fixture&gt;'));assert(html.includes('未设置 HTTPS_PROXY'));assert(html.includes('需要注意'));assert(!html.includes('检查软件 <fixture>'));
@@ -56,14 +58,14 @@ function selectedSetup(){state.selected={kind:'channel',id:'flow:setup'};}
   await check('Shortcut creation does not replace routes or launch a program',async()=>{
     const start=calls.length,before=JSON.stringify(state.appRoutes);await context.appFlowAction('shortcut');assert.deepEqual(calls.slice(start).map(item=>item.endpoint),['/api/app-routes/shortcut']);assert.equal(JSON.stringify(state.appRoutes),before);assert(state.appFlowMessages.setup.text.includes('快捷方式'));
   });
-  await check('Running Hermes has an apply-and-open action and explains its independent backend',async()=>{
-    Object.assign(state.appRoutes.routes[0],{running:true,integration:{id:'hermes',label:'Hermes 窗口与后台',notice:'后台需要采用独立代理设置。'}});context.renderAppFlowInspector();const html=node('#inspector-content').innerHTML;assert(html.includes('应用并打开'));assert(html.includes('Hermes 窗口与独立后台'));assert(html.includes('首次应用可能需要从 Hermes 菜单正常退出旧窗口'));assert(html.includes('后台处理会另行预览'));
+  await check('A synthetic managed backend uses shared lifecycle labels without an app-name branch',async()=>{
+    Object.assign(state.appRoutes.routes[0],{running:true,capabilities:{managed_backend:true},integration:{id:'fixture-backend',label:'示例软件与后台',notice:'后台需要采用独立代理设置。'}});context.renderAppFlowInspector();const html=node('#inspector-content').innerHTML;assert(html.includes('独立后台发送部分请求'));assert(html.includes('窗口、后台身份与任务状态'));assert(html.includes('预览应用步骤'));assert(!html.includes('Hermes 菜单'));
   });
   await check('Backend changes show the actual preparation steps and cancellation never launches',async()=>{
-    prepareResult={ticket:'restart-ticket',can_launch:true,requires_confirmation:true,summary:'将重启 Hermes 后台',steps:['等待当前任务结束','重启独立后台并设置代理'],notice:'其他本机 Hermes 窗口会重新连接。'};confirmResult=false;const before=launchCalls();await context.appFlowAction('launch');assert.equal(launchCalls(),before);assert(confirmations.at(-1).includes('重启独立后台并设置代理'));assert(confirmations.at(-1).includes('其他本机 Hermes 窗口'));assert(state.appFlowMessages.setup.text.includes('已取消'));
+    prepareResult={ticket:'restart-ticket',can_launch:true,requires_confirmation:true,summary:'将重启示例后台',steps:['等待当前任务结束','重启独立后台并设置代理'],notice:'其他窗口会重新连接。'};const before=launchCalls();await context.appFlowAction('launch');assert.equal(launchCalls(),before);const html=node('#inspector-content').innerHTML;assert(html.includes('重启独立后台并设置代理'));assert(html.includes('其他窗口会重新连接'));assert(html.includes('包含后台变更'));context.appFlowCancelReview();assert(state.appFlowMessages.setup.text.includes('已取消'));await context.appFlowAction('apply');assert.equal(launchCalls(),before);
   });
-  await check('Confirmed backend preparation sends its current ticket',async()=>{
-    confirmResult=true;const before=launchCalls();await context.appFlowAction('launch');assert.equal(launchCalls(),before+1);assert.equal(calls.at(-1).body.ticket,'restart-ticket');
+  await check('Explicit application of the reviewed backend uses its current ticket',async()=>{
+    const before=launchCalls();await context.appFlowAction('launch');assert.equal(launchCalls(),before);await context.appFlowAction('apply');assert.equal(launchCalls(),before+1);assert.equal(calls.at(-1).body.ticket,'restart-ticket');assert.equal(state.appFlowWorkflows.setup.applied,true);assert(!state.appFlowWorkflows.setup.verification);
   });
   await check('Blocked preparation and a missing ticket never launch',async()=>{
     const before=launchCalls();prepareResult={can_launch:false,summary:'后台正在执行任务，请稍后重试'};await context.appFlowAction('launch');assert.equal(launchCalls(),before);assert(state.appFlowMessages.setup.text.includes('正在执行任务'));
@@ -73,7 +75,7 @@ function selectedSetup(){state.selected={kind:'channel',id:'flow:setup'};}
     let resolve;pendingPrepare=new Promise(done=>resolve=done);const before=launchCalls(),task=context.appFlowAction('launch');await new Promise(done=>setImmediate(done));state.appDraftTargets.setup='flow-clear';resolve({ticket:'old-ticket',can_launch:true});await task;pendingPrepare=null;assert.equal(launchCalls(),before);assert(state.appFlowMessages.setup.text.includes('已变化'));delete state.appDraftTargets.setup;
   });
   await check('Installer is identified as an installer with guidance to select the installed main program',async()=>{
-    state.appRoutes.routes[0].integration={id:'installer',label:'Hermes 安装器',notice:'当前是安装包。'};context.renderAppFlowInspector();assert(node('#inspector-content').innerHTML.includes('日常连接请添加安装后的 Hermes 主程序'));assert(!node('#inspector-content').innerHTML.includes('>应用并打开<'));
+    state.appRoutes.routes[0].capabilities={managed_backend:false};state.appRoutes.routes[0].integration={id:'installer',label:'示例安装器',notice:'当前是安装包；请选择安装后的主程序。'};context.renderAppFlowInspector();assert(node('#inspector-content').innerHTML.includes('请选择安装后的主程序'));assert(!node('#inspector-content').innerHTML.includes('独立后台发送部分请求'));
     state.appRoutes.routes[0].integration=null;state.appRoutes.routes[0].running=false;
   });
   await check('Failed inspect or shortcut stays an explicit failure and releases the action lock',async()=>{
@@ -157,6 +159,124 @@ function selectedSetup(){state.selected={kind:'channel',id:'flow:setup'};}
   await check('Stopped proxies get a start-and-scan instruction instead of accelerator instructions',async()=>{
     const proxy=state.appRoutes.tools.find(item=>item.id==='v2rayn');proxy.can_check_http=false;proxy.endpoints=[];context.appFlowShowTool(proxy.id);let html=node('#inspector-content').innerHTML;assert(html.includes('尚未发现可检测的本机监听，请先打开代理软件，再点自动检测'));assert(!html.includes('加速和组网功能'));assert(!html.includes('id="flow-tool-check"'));
     proxy.proxy_options=[{protocol:'socks5',port:10808,proxy_url:'socks5://127.0.0.1:10808'}];context.appFlowShowTool(proxy.id);html=node('#inspector-content').innerHTML;assert(html.includes('目前仅识别到 SOCKS 入口'));assert(html.includes('当前应用连接需要 HTTP 入口'));assert(!html.includes('加速和组网功能'));
+  });
+  await check('Four workflow stages are visible for an ordinary application and keep business verification separate',async()=>{
+    selectedSetup();context.renderAppFlowInspector();const html=node('#inspector-content').innerHTML;
+    for(const label of ['检查当前软件','诊断并选择下一步','保存并预览应用','验证并记录实际结果'])assert(html.includes(label));
+    assert(html.includes('公开地址 · 可留空'));assert(html.includes('留空只检查软件'));assert(html.includes('原软件业务结果尚未确认'));
+  });
+  await check('Empty-address diagnosis checks software without inventing a URL or applying a route',async()=>{
+    context.appFlowUrlInput('');const start=calls.length,before=JSON.stringify(state.appRoutes);await context.appFlowAction('diagnose');
+    assert.deepEqual(calls.slice(start).map(item=>item.endpoint),['/api/app-routes/diagnose']);assert.deepEqual(calls.at(-1).body,{app_id:'setup'});assert.equal(state.appFlowWorkflows.setup.diagnosis.comparison,null);assert.equal(JSON.stringify(state.appRoutes),before);
+    const html=node('#inspector-content').innerHTML;assert(html.includes('请核对下一步 &lt;fixture&gt;'));assert(!html.includes('请核对下一步 <fixture>'));
+  });
+  await check('Diagnostic URL survives rerender but URL and reports never enter localStorage',async()=>{
+    context.appFlowUrlInput('https://example.test/public-path');context.renderAppFlowInspector();assert(node('#inspector-content').innerHTML.includes('value="https://example.test/public-path"'));
+    await context.appFlowAction('diagnose');assert.equal(calls.at(-1).body.url,'https://example.test/public-path');context.appFlowPersist();
+    assert(!persisted.at(-1).value.includes('example.test'));assert(!persisted.at(-1).value.includes('check-'));assert(node('#inspector-content').innerHTML.includes('只证明工作台请求'));
+  });
+  await check('Adopting a recommendation changes only the draft, then requires explicit save and preview',async()=>{
+    const count=calls.length,before=JSON.stringify(state.appRoutes);context.appFlowAdoptRecommendation();
+    assert.equal(calls.length,count);assert.equal(JSON.stringify(state.appRoutes),before);assert.equal(context.appFlowChoice('setup').mode,'http_environment');assert.equal(context.appFlowSaved('setup'),false);assert(!state.appFlowWorkflows.setup.diagnosis);
+    await context.appFlowAction('apply');assert.equal(calls.length,count);await context.appFlowAction('save');assert.equal(context.appFlowSaved('setup'),true);
+    prepareResult={ticket:'workflow-ticket',can_launch:true,requires_confirmation:false,summary:'使用已保存连接启动',steps:['打开所选软件'],notice:'仅此软件'};const beforeLaunch=launchCalls();await context.appFlowAction('launch');assert.equal(launchCalls(),beforeLaunch);await context.appFlowAction('apply');assert.equal(launchCalls(),beforeLaunch+1);assert(!state.appFlowWorkflows.setup.verification);
+  });
+  await check('A successful path probe never auto-confirms the real application; failed feedback remains explicit',async()=>{
+    const start=calls.length;await context.appFlowAction('verify');assert.deepEqual(calls.slice(start).map(item=>item.endpoint),['/api/app-routes/verify']);const flow=state.appFlowWorkflows.setup;
+    assert(flow.verification.comparison.results.some(item=>item.ok));assert.equal(flow.verification.application_result.status,'unverified');assert(node('#inspector-content').innerHTML.includes('原软件业务结果尚未确认'));
+    await context.appFlowAction('feedback-failed');assert.equal(flow.verification.application_result.status,'failed');assert.equal(flow.verification.application_result.source,'user_report');assert(node('#inspector-content').innerHTML.includes('你已反馈：原软件仍然失败'));
+    assert.equal(calls.at(-1).body.check_id,flow.verification.check_id);
+  });
+  await check('Only explicit original-app feedback records business success',async()=>{
+    await context.appFlowAction('verify');assert.equal(state.appFlowWorkflows.setup.verification.application_result.status,'unverified');await context.appFlowAction('feedback-resolved');
+    assert.equal(state.appFlowWorkflows.setup.verification.application_result.status,'resolved');assert(node('#inspector-content').innerHTML.includes('你已确认：原软件操作成功'));assert(node('#inspector-content').innerHTML.includes('用户反馈已恢复'));assert(!node('#inspector-content').innerHTML.includes('已执行应用，等待验证'));
+  });
+  await check('A failed apply drops prior verification because backend changes may have partially happened',async()=>{
+    await context.appFlowAction('verify');await context.appFlowAction('feedback-resolved');await context.appFlowAction('launch');
+    failures.set('/api/app-routes/launch','fixture partial apply failed');await context.appFlowAction('apply');failures.delete('/api/app-routes/launch');
+    assert.equal(state.appFlowWorkflows.setup.verification,null);assert.equal(state.appFlowWorkflows.setup.review,null);assert.equal(state.appFlowWorkflows.setup.applied,false);assert(!node('#inspector-content').innerHTML.includes('用户反馈已恢复'));assert(state.appFlowMessages.setup.error);
+  });
+  await check('Editing the address immediately removes old diagnostic, business and preview evidence',async()=>{
+    await context.appFlowAction('launch');assert(state.appFlowWorkflows.setup.review);const count=calls.length;context.appFlowUrlInput('https://example.test/changed');
+    const flow=state.appFlowWorkflows.setup;assert.equal(flow.verification,null);assert.equal(flow.diagnosis,null);assert.equal(flow.review,null);assert(node('#flow-verification-evidence').innerHTML.includes('旧结果不再适用'));assert.equal(calls.length,count);
+    await context.appFlowAction('feedback-resolved');assert.equal(calls.length,count);assert(state.appFlowMessages.setup.text.includes('请先验证'));
+  });
+  await check('Failed diagnostic or verification cannot leave a previous success result active',async()=>{
+    for(const action of ['diagnose','verify']){
+      await context.appFlowAction(action);const before=JSON.stringify(state.appRoutes),endpoint='/api/app-routes/'+action;failures.set(endpoint,'fixture '+action+' failure');await context.appFlowAction(action);failures.delete(endpoint);
+      assert.equal(state.appFlowWorkflows.setup[action==='diagnose'?'diagnosis':'verification'],null);assert.equal(JSON.stringify(state.appRoutes),before);assert(state.appFlowMessages.setup.error);
+    }
+  });
+  await check('A late workflow report belongs only to its original application',async()=>{
+    let resolve;pendingWorkflow=new Promise(done=>resolve=done);const task=context.appFlowAction('diagnose');await new Promise(done=>setImmediate(done));state.selected={kind:'channel',id:'flow:other'};context.renderAppFlowInspector();
+    resolve({check_id:'late-check',app_id:'setup',stage:'diagnose',inspection:{summary:'setup-only check',checks:[]},summary:'setup-only workflow',next_steps:[],application_result:{status:'unverified',source:'none'}});await task;pendingWorkflow=null;
+    assert.equal(state.appFlowWorkflows.setup.diagnosis.check_id,'late-check');assert(!node('#inspector-content').innerHTML.includes('setup-only'));assert(!state.appFlowWorkflows.other.diagnosis);selectedSetup();context.renderAppFlowInspector();
+  });
+  await check('A URL change while diagnosing discards the stale response',async()=>{
+    let resolve;pendingWorkflow=new Promise(done=>resolve=done);const task=context.appFlowAction('diagnose');await new Promise(done=>setImmediate(done));context.appFlowUrlInput('https://example.test/new-target');
+    resolve({check_id:'stale-address',app_id:'setup',stage:'diagnose',inspection:{summary:'stale',checks:[]},summary:'old target',next_steps:[]});await task;pendingWorkflow=null;assert.equal(state.appFlowWorkflows.setup.diagnosis,null);assert(state.appFlowMessages.setup.text.includes('未采用'));
+  });
+  await check('Rewiring invalidates old evidence even if the original destination is chosen again',async()=>{
+    await context.appFlowAction('verify');await context.appFlowAction('launch');assert(state.appFlowWorkflows.setup.review);state.pending={channel:'flow:setup'};context.appFlowConnect('flow-clear');state.pending={channel:'flow:setup'};context.appFlowConnect('flow-proxy:http://127.0.0.1:10808');
+    assert.equal(context.appFlowSaved('setup'),true);assert(!state.appFlowWorkflows.setup.review);assert(!state.appFlowWorkflows.setup.verification);const before=launchCalls();await context.appFlowAction('apply');assert.equal(launchCalls(),before);
+  });
+  await check('Leaving and returning to a selection invalidates a prepared action',async()=>{
+    await context.appFlowAction('launch');assert(state.appFlowWorkflows.setup.review);state.selected={kind:'channel',id:'flow:other'};context.renderAppFlowInspector();selectedSetup();context.renderAppFlowInspector();
+    assert(!state.appFlowWorkflows.setup.review);const before=launchCalls();await context.appFlowAction('apply');assert.equal(launchCalls(),before);
+  });
+  await check('Expired previews cannot launch a program',async()=>{
+    await context.appFlowAction('launch');state.appFlowWorkflows.setup.review.expires=Date.now()-1;const before=launchCalls();await context.appFlowAction('apply');assert.equal(launchCalls(),before);assert(state.appFlowMessages.setup.text.includes('失效'));
+  });
+  await check('A report for a different app is rejected instead of being adopted',async()=>{
+    workflowOverride={check_id:'wrong-app',app_id:'other',stage:'diagnose',inspection:{summary:'Wrong',checks:[]}};await context.appFlowAction('diagnose');workflowOverride=null;assert(!state.appFlowWorkflows.setup.diagnosis);assert(state.appFlowMessages.setup.text.includes('不一致'));
+  });
+  await check('Server rejection of a private URL is shown without dropping the editable input',async()=>{
+    context.appFlowUrlInput('https://example.test/path?token=fixture');failures.set('/api/app-routes/diagnose','地址不能包含查询参数');const before=JSON.stringify(state.appRoutes);await context.appFlowAction('diagnose');failures.delete('/api/app-routes/diagnose');assert(state.appFlowMessages.setup.text.includes('查询参数'));assert.equal(JSON.stringify(state.appRoutes),before);assert.equal(state.appFlowWorkflows.setup.url,'https://example.test/path?token=fixture');context.appFlowUrlInput('');
+  });
+  await check('Feedback rejected as expired does not claim the actual application recovered',async()=>{
+    await context.appFlowAction('verify');failures.set('/api/app-routes/feedback','检查记录已过期');await context.appFlowAction('feedback-resolved');failures.delete('/api/app-routes/feedback');assert.equal(state.appFlowWorkflows.setup.verification.application_result.status,'unverified');assert(state.appFlowMessages.setup.text.includes('过期'));
+  });
+  await check('Actual inspector click handler routes diagnosis without an implicit application',async()=>{
+    const start=calls.length;context.appFlowInspectorClick({target:{closest:selector=>selector==='#flow-diagnose'?{}:null}});await new Promise(done=>setImmediate(done));assert.deepEqual(calls.slice(start).map(item=>item.endpoint),['/api/app-routes/diagnose']);
+  });
+  await check('Settings and logs button opens the selected app and clears hiding filters without changing routes',async()=>{
+    selectedSetup();context.renderAppFlowInspector();assert(node('#inspector-content').innerHTML.includes('查看此软件的设置与日志'));
+    state.catalog={apps:[{id:'other'}]};state.catalogSelected='other';node('#catalog-search').value='not-this-app';node('#catalog-running-only').checked=true;
+    await context.appFlowAction('launch');assert(state.appFlowWorkflows.setup.review);const before=JSON.stringify(state.appRoutes),count=calls.length;
+    context.appFlowInspectorClick({target:{closest:selector=>selector==='#flow-open-catalog'?{}:null}});
+    assert.equal(state.workspace,'catalog');assert.equal(state.catalogSelected,'setup');assert(state.catalog.apps.some(app=>app.id==='setup'));assert.equal(node('#catalog-search').value,'');assert.equal(node('#catalog-running-only').checked,false);assert(!state.appFlowWorkflows.setup.review);assert.equal(JSON.stringify(state.appRoutes),before);assert.equal(calls.length,count);
+    state.workspace='routing';
+  });
+  await check('Compact drawers show readable inventory counts and open exclusively with accessible close controls',async()=>{
+    const count=calls.length,before=JSON.stringify(state.appRoutes);state.compact=true;context.syncCompactPanels();context.renderAppFlowLibrary();
+    assert.equal(node('#library-toggle-count').textContent,String(call('appFlowApps()').filter(app=>!['proxy','accelerator','tunnel','tool'].includes(app.category)).length+state.appRoutes.tools.length));
+    assert.equal(node('#library-panel').inert,true);assert.equal(node('#inspector-panel').inert,true);assert.equal(node('#compact-panel-backdrop').hidden,true);
+    context.setCompactPanel('library',true,true);assert(node('.main-grid').classList.contains('library-open'));assert.equal(node('#library-panel').inert,false);assert.equal(node('#toggle-library').attributes['aria-expanded'],'true');assert.equal(node('#app-search').focused,true);
+    context.setCompactPanel('inspector',true,true);assert(!node('.main-grid').classList.contains('library-open'));assert.equal(node('#library-panel').inert,true);assert.equal(node('#inspector-panel').inert,false);assert.equal(node('#close-inspector').focused,true);
+    context.closeCompactPanels(true);assert.equal(node('#compact-panel-backdrop').hidden,true);assert.equal(node('#toggle-inspector').attributes['aria-expanded'],'false');assert.equal(node('#toggle-inspector').focused,true);
+    assert.equal(JSON.stringify(state.appRoutes),before);assert.equal(calls.length,count);
+  });
+  await check('Returning to desktop restores both panels and removes compact overlays',async()=>{
+    context.setCompactPanel('library',true);state.compact=false;context.syncCompactPanels();assert.equal(node('#library-panel').inert,false);assert.equal(node('#inspector-panel').inert,false);assert.equal(node('#compact-panel-backdrop').hidden,true);node('.main-grid').classList.remove('library-open');
+  });
+  await check('Viewport resize fits an automatic view without resetting manually positioned nodes',async()=>{
+    runFrames();const oldFit=context.fit;let fits=0;context.fit=()=>{fits++;};state.workspace='routing';state.canvasSize=null;state.viewAutoFit=true;context.innerWidth=650;
+    const layout=JSON.stringify(state.appLayout);Object.assign(node('#graph-viewport'),{clientWidth:650,clientHeight:420});context.resizeCanvas();runFrames();assert.equal(fits,1);assert.equal(state.compact,true);
+    context.resizeCanvas();runFrames();assert.equal(fits,1);node('#graph-viewport').clientWidth=420;context.innerWidth=420;context.resizeCanvas();runFrames();assert.equal(fits,2);assert.equal(JSON.stringify(state.appLayout),layout);
+    context.fit=oldFit;
+  });
+  await check('A manual zoom keeps its scale and focal point on resize; crossing the layout breakpoint fits once',async()=>{
+    const oldFit=context.fit;let fits=0;context.fit=()=>{fits++;};state.viewAutoFit=false;state.view={x:10,y:20,zoom:.72};state.canvasSize={width:420,height:420};Object.assign(node('#graph-viewport'),{clientWidth:650,clientHeight:500});context.innerWidth=650;context.resizeCanvas();runFrames();
+    assert.equal(fits,0);assert.equal(state.view.zoom,.72);assert.equal(state.view.x,125);assert.equal(state.view.y,60);
+    context.setCompactPanel('library',true);context.innerWidth=1366;node('#graph-viewport').clientWidth=800;context.resizeCanvas();runFrames();assert.equal(fits,1);assert.equal(state.compact,false);assert.equal(node('#compact-panel-backdrop').hidden,true);assert(!node('.main-grid').classList.contains('library-open'));context.fit=oldFit;
+  });
+  await check('Resize during a node drag waits without changing positions or replacing the viewport',async()=>{
+    const oldFit=context.fit;let fits=0;context.fit=()=>{fits++;};const prior=JSON.stringify(state.canvasSize),layout=JSON.stringify(state.appLayout);state.viewAutoFit=true;context.pointer={kind:'node'};node('#graph-viewport').clientWidth=760;context.resizeCanvas();runFrames();assert.equal(fits,0);assert.equal(JSON.stringify(state.canvasSize),prior);assert.equal(JSON.stringify(state.appLayout),layout);
+    context.pointer=null;context.resizeCanvas();runFrames();assert.equal(fits,1);context.fit=oldFit;
+  });
+  await check('Diagnosis shows current progress while fresh information is pending',async()=>{
+    selectedSetup();let resolve;pendingWorkflow=new Promise(done=>resolve=done);const work=context.appFlowAction('diagnose');await new Promise(done=>setImmediate(done));assert(state.appFlowMessages.setup.text.includes('正在刷新本机信息并诊断'));
+    resolve({check_id:'progress-check',app_id:'setup',stage:'diagnose',inspection:{summary:'Fresh information',checks:[]},summary:'Completed',next_steps:[]});await work;pendingWorkflow=null;assert(!state.appFlowMessages.setup.text.includes('正在刷新'));
   });
   const report={checked_at:new Date().toISOString(),method:'Actual canvas model, renderer and actions with synthetic DOM/API; no browser visual check and no application launches',passed,count:passed.length,source_sha256:{'web/app.js':crypto.createHash('sha256').update(product).digest('hex')}};
   fs.mkdirSync(path.join(root,'artifacts'),{recursive:true});fs.writeFileSync(path.join(root,'artifacts/app-flow-ui-verification.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify({passed:true,count:passed.length}));

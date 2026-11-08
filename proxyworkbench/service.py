@@ -96,6 +96,9 @@ class Service:
         self._catalog_cache = None
         self.guide_slots = threading.BoundedSemaphore(1)
         self.guide_checks = {}
+        self.workflow_checks = {}
+        self.workflow_epochs = {}
+        self.applying_routes = set()
         self.route_sessions = {}
         self.network_check_lock = threading.Lock()
         self.verified_proxy_entrances = []
@@ -340,13 +343,13 @@ class Service:
 
     def _app_route(self, value):
         from .app_routes import proxy_url, MODES
-        from .hermes_adapter import describe as integration_for
+        from .app_adapters import resolve
         app=self._catalog()._apps.get(value.get('app_id'))
         if not app or app['protected'] or not app['launch_profile']['available']:
             raise ValueError('请先为该软件选择准确主程序；受保护组件不能在此重配')
-        integration=integration_for(app['launch_profile']['executable'])
-        if integration and integration['id']=='hermes_unsupported':
-            raise ValueError(integration['notice'])
+        adapter=resolve(app['launch_profile']['executable'])
+        if not adapter.capabilities['can_apply']:
+            raise ValueError(adapter.description['notice'])
         mode=value.get('mode')
         if mode not in MODES:raise ValueError('请选择支持的连接方式')
         endpoint=proxy_url(value.get('proxy_url')) if mode=='http_environment' else ''
@@ -372,11 +375,11 @@ class Service:
             with launch_lock(self.root, key):
                 self.store.write('app-routes.json',document)
             self.route_sessions.pop(key,None)
+            self._invalidate_workflows(key)
             self.audit('保存可视化应用连接设置',{'app_id':app['id'],'mode':mode,'proxy_url':endpoint})
             return self.app_routes_state()
 
     def app_route_launch(self, value):
-        from .app_launch import launch
         from .app_routes import parse,route_key
         with self.lock:
             self._ensure_open()
@@ -387,19 +390,26 @@ class Service:
             record=next((item for item in records if executable and item['key']==route_key(executable)),None)
             if not record:raise ValueError('请先保存该软件的连接设置')
             app,mode,endpoint=self._app_route({'app_id':app['id'],**record})
-        from .hermes_adapter import installation
-        if value.get('ticket'):
-            result=self.launch_reviews.apply(record,value['ticket'])
-        elif installation(executable):
-            raise ValueError('请先预览 Hermes 后台的应用步骤，再确认执行。')
-        else:
-            result=launch(executable,endpoint,mode)
+        if not value.get('ticket'):
+            raise ValueError('请先预览应用步骤，再确认执行；所有软件使用同一检查流程。')
         with self.lock:
-            current=next((item for item in parse(self.store.read('app-routes.json',{'schema_version':1,'routes':[]}))['routes'] if item['key']==record['key']),None)
-            if current and current['mode']==mode and current['proxy_url']==endpoint:
-                self.route_sessions[record['key']]={'pid':result['pid'],'started_at':now(),'mode':mode,'proxy_url':endpoint}
-            self.audit('从可视化设置启动目标软件',{'app_id':app['id'],'pid':result['pid'],'mode':mode})
-            return {'launch':result,**self.app_routes_state()}
+            if record['key'] in self.applying_routes:
+                raise ValueError('此软件已有应用操作正在进行，请等待结束。')
+            self.applying_routes.add(record['key'])
+            self._invalidate_workflows(record['key'])
+        try:
+            result=self.launch_reviews.apply(record,value['ticket'])
+            with self.lock:
+                current=next((item for item in parse(self.store.read('app-routes.json',{'schema_version':1,'routes':[]}))['routes'] if item['key']==record['key']),None)
+                if current and current['mode']==mode and current['proxy_url']==endpoint:
+                    self.route_sessions[record['key']]={'pid':result['pid'],'started_at':now(),'mode':mode,'proxy_url':endpoint}
+                self.audit('从可视化设置启动目标软件',{'app_id':app['id'],'pid':result['pid'],'mode':mode})
+                return {'launch':result,**self.app_routes_state()}
+        finally:
+            with self.lock:
+                self.applying_routes.discard(record['key'])
+                # A failed operation can still have changed a backend.
+                self._invalidate_workflows(record['key'])
 
     def _saved_app_record(self, value, *, required=True):
         from .app_routes import parse, route_key
@@ -434,6 +444,96 @@ class Service:
         self.audit('创建应用桌面快捷方式（未启动）', {'app_id': app['id'], 'mode': record['mode']})
         return result
 
+    def _invalidate_workflows(self, key):
+        self.workflow_epochs[key] = self.workflow_epochs.get(key, 0) + 1
+        self.workflow_checks = {identifier: entry for identifier, entry in self.workflow_checks.items()
+                                if entry['record']['key'] != key}
+
+    def app_route_workflow(self, value, stage):
+        from .app_workflow import optional_url, compose
+        from .app_connections import inspect, public_check
+        if stage not in {'diagnose', 'verify'}:
+            raise ValueError('未知的应用检查步骤')
+        url = optional_url(value)
+        if not self.guide_slots.acquire(blocking=False):
+            raise RuntimeError('已有一项诊断或验证正在进行，请等待结果。')
+        try:
+            with self.lock:
+                self._ensure_open()
+                self._saved_app_record(value, required=stage == 'verify')
+            scan = self.discover()
+            if scan.get('discovering') or scan.get('error'):
+                raise ValueError('检测尚未完成，暂不能使用旧快照诊断；请稍后重试。')
+            with self.lock:
+                app, record = self._saved_app_record(value, required=stage == 'verify')
+                if record['key'] in self.applying_routes:
+                    raise ValueError('正在应用此软件的设置，请结束后重新检查。')
+                epoch = self.workflow_epochs.get(record['key'], 0)
+                session = copy.deepcopy(self.route_sessions.get(record['key']))
+                snapshot = copy.deepcopy(self.snapshot)
+                snapshot['network_tools'] = self._workflow_tools()
+                saved = any(r['key'] == record['key'] and r['saved'] for r in self.app_routes_state()['routes'])
+            inspection = public_check(inspect(record))
+            def runner(address, target, **kwargs):
+                with self.probe_slots:
+                    return probes.probe(address, target, forbidden_ports=(self.control_port,), **kwargs)
+            report = compose(stage, app, record, saved, inspection, snapshot, url, runner)
+            with self.lock:
+                self._ensure_open()
+                _, current = self._saved_app_record(value, required=stage == 'verify')
+                if (current != record or self.route_sessions.get(record['key']) != session or
+                        record['key'] in self.applying_routes or self.workflow_epochs.get(record['key'], 0) != epoch):
+                    raise ValueError('检查期间连接设置或应用状态已变化，请重新检查。')
+                identifier = secrets.token_urlsafe(24)
+                report.update(check_id=identifier, captured_at=now())
+                self._invalidate_workflows(record['key'])
+                self.workflow_checks = {key: entry for key, entry in self.workflow_checks.items()
+                                        if time.monotonic() - entry['at'] < 600}
+                while len(self.workflow_checks) >= 32:
+                    self.workflow_checks.pop(next(iter(self.workflow_checks)))
+                # Keep only scoped identity, never target URL or raw process values.
+                self.workflow_checks[identifier] = {'at': time.monotonic(), 'record': record,
+                    'session': session, 'app_id': app['id'], 'stage': stage,
+                    'epoch': self.workflow_epochs[record['key']]}
+                self.audit('完成应用诊断' if stage == 'diagnose' else '完成应用验证',
+                           {'app_id': app['id'], 'target_tested': bool(url), 'business': 'unverified'})
+                return report
+        finally:
+            self.guide_slots.release()
+
+    def _workflow_tools(self):
+        tools = self._network_tools()
+        options = []
+        for channel in self.relay.status().get('channels', []):
+            endpoint = channel.get('proxy_url')
+            if endpoint:
+                parsed = urlsplit(endpoint)
+                options.append({'id': 'relay-' + channel['id'], 'protocol': 'http', 'proxy_url': endpoint,
+                    'host': parsed.hostname, 'port': parsed.port, 'tool_name': '本地分流', 'tool_id': 'flowdesk-relay'})
+        if options:
+            tools.append({'id': 'flowdesk-relay', 'proxy_options': options})
+        return tools
+
+    def app_route_feedback(self, value):
+        with self.lock:
+            self._ensure_open()
+            identifier = value.get('check_id')
+            entry = self.workflow_checks.get(identifier) if isinstance(identifier, str) else None
+            if (not entry or entry['stage'] != 'verify' or entry['app_id'] != value.get('app_id')
+                    or time.monotonic() - entry['at'] >= 600):
+                raise ValueError('验证记录已过期或不属于此软件，请先重新验证。')
+            _, record = self._saved_app_record(value)
+            if (record != entry['record'] or self.route_sessions.get(record['key']) != entry['session'] or
+                    record['key'] in self.applying_routes or self.workflow_epochs.get(record['key']) != entry['epoch']):
+                raise ValueError('连接设置或应用状态已变化，请重新验证后记录结果。')
+            outcome = value.get('outcome')
+            if outcome not in {'resolved', 'failed'}:
+                raise ValueError('请选择原软件已经恢复或仍有问题。')
+            self.audit('用户确认应用复测结果', {'app_id': entry['app_id'], 'outcome': outcome, 'source': 'user_report'})
+            return {'check_id': identifier, 'application_result': {'status': outcome, 'source': 'user_report'},
+                    'message': '已记录你确认原软件恢复。检查证据仍保留各自范围。' if outcome == 'resolved' else
+                               '已记录仍有问题。请查看软件日志或使用新的失败地址重新诊断；没有将探测成功当作修复。'}
+
     def guide_check(self, value):
         from .troubleshoot import diagnose, problem_url
         problem_url(value)  # Reject private/invalid URLs before any collection or probe.
@@ -449,6 +549,7 @@ class Service:
             with self.lock:
                 snapshot = copy.deepcopy(self.snapshot)
                 app = next((app for app in self._catalog().describe()['apps'] if app['id'] == value.get('app_id')), None)
+                snapshot['network_tools'] = self._workflow_tools()
                 if app is None:
                     raise ValueError('该进程已退出，请把主程序添加到本机软件后重试')
             def runner(url, target, **kwargs):
@@ -483,7 +584,7 @@ class Service:
             app = self._catalog()._apps.get(result['app_id'])
             if not app or app.get('executable') != entry['executable']:
                 raise ValueError('程序记录已经变化，请重新检测')
-            available = [option['proxy_url'] for tool in self.snapshot.get('network_tools', []) for option in tool.get('proxy_options', [])]
+            available = [option['proxy_url'] for tool in self._workflow_tools() for option in tool.get('proxy_options', [])]
             if profile['proxy_url'] not in available:
                 raise ValueError('代理入口已经变化，请重新识别与检测')
             exported = self.catalog_launch_profile({'app_id': result['app_id'], **profile})
@@ -501,18 +602,9 @@ class Service:
                     'message': '已记录你确认本次操作成功。' if value['outcome'] == 'resolved' else '请粘贴新的错误地址再检测；后续安装阶段可能访问不同目标。'}
 
     def guide_launch(self, value):
-        from .app_launch import launch
         with self.lock:
             self.guide_profile(value)  # Same app protection, expiry and entrance validation as export.
-            entry = self._guide_checked(value)
-            app = self._catalog()._apps[entry['result']['app_id']]
-            if app['protected']:
-                raise ValueError('该工作连接受保护，请在软件自己的设置中操作')
-            executable = app['launch_profile']['executable']
-            proxy_url = entry['result']['recommendation']['profile']['proxy_url']
-        result = launch(executable, proxy_url)
-        self.audit('用户按检测方案启动目标新进程', {'app_id': entry['result']['app_id'], 'pid': result['pid'], 'proxy_url': proxy_url})
-        return result
+        raise ValueError('请在路由设计中选择并保存建议连接，再预览应用；旧向导不能绕过检查直接启动。')
 
     def preview(self, value):
         plan = design_plan(value)

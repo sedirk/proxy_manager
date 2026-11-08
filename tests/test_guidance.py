@@ -142,8 +142,9 @@ class GuideServiceTests(unittest.TestCase):
         self.assertIn(str(self.exe),profile['content'])
         self.assertIn('127.0.0.1:10808',profile['content'])
         with patch('proxyworkbench.app_launch.launch',return_value={'pid':123,'notice':'fixture'}) as launch:
-            self.service.guide_launch({'check_id':report['check_id']})
-            launch.assert_called_once_with(str(self.exe),option()['proxy_url'])
+            with self.assertRaisesRegex(ValueError,'预览应用'):
+                self.service.guide_launch({'check_id':report['check_id']})
+            launch.assert_not_called()
         self.assertEqual(self.service.guide_feedback({'check_id':report['check_id'],'outcome':'resolved'})['source'],'user_report')
         self.assertEqual(before,self.service.plan)
         self.assertFalse(self.service.relay.status()['running'])

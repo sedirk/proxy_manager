@@ -271,6 +271,30 @@ def main():
             assert not launch_preview['requires_confirmation']
             report['application_launch_review']={'inspect':True,'preview_only':True,'target_application_not_launched':True}
             try:
+                api('/api/app-routes/launch', {'app_id': added['app_id']})
+                raise AssertionError('Ordinary applications also require a preview ticket')
+            except urllib.error.HTTPError as error:
+                assert error.code == 400
+            diagnosis = api('/api/app-routes/diagnose', {'app_id': added['app_id']})
+            assert diagnosis['stage'] == 'diagnose' and diagnosis['comparison'] is None
+            assert diagnosis['inspection']['capabilities']['adapter_id'] == 'process_environment'
+            verification = api('/api/app-routes/verify', {'app_id': added['app_id']})
+            assert verification['stage'] == 'verify' and verification['comparison'] is None
+            assert verification['application_result']['status'] == 'unverified'
+            feedback = api('/api/app-routes/feedback', {'app_id': added['app_id'],
+                           'check_id': verification['check_id'], 'outcome': 'failed'})
+            assert feedback['application_result'] == {'status': 'failed', 'source': 'user_report'}
+            api('/api/app-routes/save', {'app_id': added['app_id'], 'mode': 'inherit'})
+            try:
+                api('/api/app-routes/feedback', {'app_id': added['app_id'],
+                    'check_id': verification['check_id'], 'outcome': 'resolved'})
+                raise AssertionError('A saved change must invalidate the earlier evidence')
+            except urllib.error.HTTPError as error:
+                assert error.code == 400
+            report['application_workflow'] = {'diagnose_without_target': True, 'verify_saved_settings': True,
+                'user_feedback_is_separate': True, 'save_invalidates_evidence': True,
+                'launch_requires_ticket': True, 'target_application_not_launched': True}
+            try:
                 api('/api/network-tools/check', {'tool_id': 'unobserved-fixture', 'port': origin.server_port})
                 raise AssertionError('Unobserved listener must not be probed')
             except urllib.error.HTTPError as error:

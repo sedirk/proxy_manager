@@ -40,11 +40,19 @@ class AppRouteTests(unittest.TestCase):
 
     def test_launch_uses_saved_route_and_ignores_supplied_overrides(self):
         self.save()
-        with patch('proxyworkbench.app_launch.launch',return_value={'pid':12,'notice':'fixture'}) as launch:
-            state=self.service.app_route_launch({'app_id':self.app_id,'proxy_url':'http://evil.example:999','mode':'inherit'})
-            launch.assert_called_once_with(str(self.exe),'http://127.0.0.1:10808','http_environment')
+        with patch.object(self.service.launch_reviews,'apply',return_value={'pid':12,'notice':'fixture'}) as apply:
+            state=self.service.app_route_launch({'app_id':self.app_id,'ticket':'fixture-ticket','proxy_url':'http://evil.example:999','mode':'inherit'})
+            self.assertEqual(apply.call_args.args[0]['proxy_url'],'http://127.0.0.1:10808')
+            self.assertEqual(apply.call_args.args[0]['mode'],'http_environment')
+            self.assertEqual(apply.call_args.args[1],'fixture-ticket')
         route=next(item for item in state['routes'] if item['app_id']==self.app_id)
         self.assertEqual(route['session']['pid'],12)
+
+    def test_ordinary_app_cannot_bypass_preview_ticket(self):
+        self.save('inherit')
+        with patch('proxyworkbench.app_launch.launch') as launch:
+            with self.assertRaisesRegex(ValueError,'预览'):self.service.app_route_launch({'app_id':self.app_id})
+            launch.assert_not_called()
 
     def test_missing_save_changed_entrance_or_protected_target_refuses_launch(self):
         with self.assertRaisesRegex(ValueError,'先保存'):self.service.app_route_launch({'app_id':self.app_id})

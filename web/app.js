@@ -79,6 +79,33 @@
   }
   function observedApp(recipe) { return (state.snapshot?.apps || []).find(a => recipe.id==='browser'?/browser|chrome|edge|firefox/i.test(a.id):recipe.id==='wows'?/wows|warships|wgc/i.test(a.id):a.id===recipe.id); }
   const appFlowApps = () => state.appRoutes?.catalog?.apps || [];
+  function syncCompactPanels(){
+    const grid=$('.main-grid'),compact=Boolean(state.compact),library=compact&&grid.classList.contains('library-open'),inspector=compact&&grid.classList.contains('inspector-open');
+    $('#library-panel').inert=compact&&!library;$('#inspector-panel').inert=compact&&!inspector;
+    $('#toggle-library').setAttribute('aria-expanded',String(library));$('#toggle-inspector').setAttribute('aria-expanded',String(inspector));
+    $('#toggle-library').setAttribute('aria-label',library?'收起应用与工具':'展开应用与工具');$('#toggle-inspector').setAttribute('aria-label',inspector?'收起节点属性':'展开节点属性');
+    $('#compact-panel-backdrop').hidden=!(library||inspector);
+  }
+  function setCompactPanel(name,open,focus=false){
+    if(!state.compact)return;const grid=$('.main-grid');
+    if(open){grid.classList.remove('library-open','inspector-open');grid.classList.add(name+'-open');}else grid.classList.remove(name+'-open');
+    syncCompactPanels();if(focus)$(open?(name==='library'?'#app-search':'#close-inspector'):'#toggle-'+name).focus({preventScroll:true});
+  }
+  function closeCompactPanels(focus=false){
+    const grid=$('.main-grid'),name=grid.classList.contains('library-open')?'library':'inspector';
+    if(state.compact&&(grid.classList.contains('library-open')||grid.classList.contains('inspector-open')))setCompactPanel(name,false,focus);
+  }
+  function resizeCanvas(){
+    const viewport=$('#graph-viewport'),width=viewport.clientWidth,height=viewport.clientHeight,compact=innerWidth<=1000,changed=compact!==state.compact;
+    state.compact=compact;$('.main-grid').classList.toggle('compact',compact);if(changed)$('.main-grid').classList.remove('library-open','inspector-open');syncCompactPanels();
+    if(width<1||height<1||state.workspace!=='routing'||pointer)return;
+    const old=state.canvasSize;if(!changed&&old&&old.width===width&&old.height===height)return requestEdges();
+    state.canvasSize={width,height};
+    requestAnimationFrame(()=>{if(pointer||state.workspace!=='routing')return;
+      if(changed||!old||state.viewAutoFit!==false)fit();
+      else{state.view.x+=(width-old.width)/2;state.view.y+=(height-old.height)/2;applyView();requestEdges();}
+    });
+  }
   const appFlowRoute = id => state.appRoutes?.routes?.find(item=>item.app_id===id);
   function appFlowTargets(){
     const items=[{id:'flow-default',name:'沿用默认设置',type:'inherit'},{id:'flow-clear',name:'不使用环境代理',type:'clear'}];
@@ -168,6 +195,7 @@
   function renderAppFlowLibrary(){
     const query=$('#app-search').value.toLowerCase(),apps=appFlowApps().filter(app=>!['proxy','accelerator','tunnel','tool'].includes(app.category));
     $('#app-count').textContent=apps.length+' 个本机软件';
+    $('#library-toggle-count').textContent=String(apps.length+(state.appRoutes?.tools||[]).length);
     $('#application-library').innerHTML=apps.filter(app=>(app.name+' '+(app.executable||'')).toLowerCase().includes(query)).map(app=>`<div class="app-card ${app.protected?'protected':''}" data-app="${h(app.id)}" draggable="${!app.protected}"><span class="app-symbol">${h(app.name.slice(0,1))}</span><div class="app-card-copy"><strong>${h(app.name)}</strong><small>${app.protected?'保留现有工作连接':appFlowRoute(app.id)?.saved?'已有连接设置':app.running_processes.length?'正在运行 · 设置用于下次启动':'添加到画布设置连接'}</small></div><button class="app-add" data-add-app="${h(app.id)}" aria-label="将${h(app.name)}加入画布">${icon(app.protected?'lock':'plus')}</button></div>`).join('')+`<button class="button button-outline full-width" data-flow-add>＋ 添加其他软件</button><div class="flow-tools-heading">已识别的网络工具</div>`+(state.appRoutes?.tools||[]).map(tool=>`<div class="flow-tool-card" data-flow-tool="${h(tool.id)}" draggable="true" role="button" tabindex="0" aria-label="显示${h(tool.name)}；也可拖入画布"><div class="flow-tool-copy"><strong>${h(tool.name)}</strong><small>${h(tool.state_label||'状态未确认')} · ${(tool.proxy_options||[]).length?h(tool.proxy_options.map(item=>String(item.protocol).toUpperCase()+' '+item.port).join(' / ')):h(tool.kind||'协议待确认')}</small><small>${appFlowToolTargets(tool).length?'显示已有入口 · 可拖动定位':'查看网络工具 · 可拖入画布'}</small></div><button class="flow-tool-show" type="button" aria-label="${appFlowToolTargets(tool).length?'显示':'查看'}${h(tool.name)}">${appFlowToolTargets(tool).length?'显示':'查看'}</button></div>`).join('');
   }
   function appFlowAdd(id,position){
@@ -180,7 +208,7 @@
     $('.canvas-legend').innerHTML='<i class="legend-line"></i>软件启动设置 · 实际连接请在原软件验证';
     $('.workbench').classList.toggle('app-flow-active',state.workspace==='routing');
     $('.main-grid').classList.add('app-connection-mode');$('.routing-workspace').classList.add('app-connection-mode');
-    $('#focus-view').textContent=state.focusMode?'全部软件':'聚焦软件';$('.canvas-view-label').innerHTML='<i></i>应用连接设置';$('.canvas-topline-note').textContent='选软件 → 连入口 → 保存并启动';
+    $('#focus-view').textContent=state.focusMode?'全部软件':'聚焦软件';$('.canvas-view-label').innerHTML='<i></i>应用连接设置';$('.canvas-topline-note').textContent='检查 → 诊断 → 预览应用 → 验证';
     let channels=appFlowChannels();if(state.focusMode&&channels.length){const selected=channels.find(item=>item.id===state.selected.id)||channels.find(item=>item.id===state.appFlowSelected)||channels[0];state.appFlowSelected=selected.id;channels=[selected];if(state.selected.kind==='channel'||!state.selected.id)state.selected={kind:'channel',id:selected.id};}
     state.worldNodes=channels.map((c,index)=>({id:c.id,kind:'source',name:c.name,category:'browser',channels:[c],position:state.appLayout[c.id]||{x:45,y:150+index*210}}));
     appFlowTargets().forEach((item,index)=>state.worldNodes.push({id:'target:'+item.id,kind:'target',target:item,position:state.appLayout['target:'+item.id]||{x:460,y:35+index*190}}));
@@ -208,69 +236,177 @@
     const labels={ok:'已确认',warning:'需要注意',unknown:'尚未确认'};
     return `<div class="flow-inspection-result" role="status"><p class="flow-inspection-summary">${h(report.summary||'检查已返回，请核对各项结果。')}</p>${(Array.isArray(report.checks)?report.checks:[]).slice(0,20).map(check=>`<article class="flow-check flow-check-${['ok','warning','unknown'].includes(check.status)?check.status:'unknown'}"><div><strong>${h(check.label||'检查项')}</strong><span>${labels[check.status]||labels.unknown}</span></div><p>${h(check.detail||'未返回详细信息')}</p></article>`).join('')}</div>`;
   }
+  function appFlowWorkflow(id){
+    const workflows=state.appFlowWorkflows??={};
+    return workflows[id]??={url:'',revision:0,diagnosis:null,verification:null,review:null,applied:false};
+  }
+  function appFlowRouteStamp(id){
+    const route=appFlowRoute(id);
+    return JSON.stringify([route?.key,route?.executable,route?.saved,route?.mode,route?.proxy_url,route?.updated_at]);
+  }
+  function appFlowInvalidate(id){
+    const flow=appFlowWorkflow(id);flow.revision++;flow.diagnosis=null;flow.verification=null;flow.review=null;flow.applied=false;
+    if(state.appFlowInspections)delete state.appFlowInspections[id];
+  }
+  function appFlowWorkflowSync(id){
+    const flow=appFlowWorkflow(id),choice=JSON.stringify(appFlowChoice(id)),route=appFlowRouteStamp(id);
+    if(flow.choice!==undefined&&(flow.choice!==choice||flow.route!==route))appFlowInvalidate(id);
+    flow.choice=choice;flow.route=route;return flow;
+  }
+  function appFlowUrlInput(value){
+    const c=channel(state.selected.id);if(!state.appMode||!c)return;
+    const flow=appFlowWorkflowSync(c.app_id),url=String(value).slice(0,2048);
+    if(flow.url!==url){
+      appFlowInvalidate(c.app_id);flow.url=url;
+      const stale='<p class="field-note">地址已变化，请重新检测；旧结果不再适用。</p>';
+      for(const selector of ['#flow-diagnosis-evidence','#flow-verification-evidence','#flow-review']){const node=$(selector);if(node)node.innerHTML=stale;}
+      const inspection=$('#flow-inspection');if(inspection)inspection.innerHTML=appFlowInspection(c.app_id);
+    }
+  }
+  function appFlowContext(id){
+    const flow=appFlowWorkflowSync(id);
+    return {revision:flow.revision,choice:JSON.stringify(appFlowChoice(id)),route:appFlowRouteStamp(id),url:flow.url.trim(),selection:state.appFlowSelectionEpoch||0};
+  }
+  function appFlowCurrent(id,context,selection=false){
+    const flow=appFlowWorkflowSync(id);
+    return flow.revision===context.revision&&JSON.stringify(appFlowChoice(id))===context.choice&&appFlowRouteStamp(id)===context.route&&flow.url.trim()===context.url&&(!selection||(appFlowSelected(id)&&(state.appFlowSelectionEpoch||0)===context.selection));
+  }
   function appFlowInspection(id){
-    const report=state.appFlowInspections?.[id];return report?appFlowCheckReport(report):'<p class="field-note">检查当前软件和独立后台的代理线索，再决定怎样应用。检测本身不会启动或重启软件。</p>';
+    const report=state.appFlowInspections?.[id];return report?appFlowCheckReport(report):'<p class="field-note">读取当前进程和已适配后台的代理线索；不会启动或重启软件。</p>';
+  }
+  function appFlowReport(report){
+    if(!report)return '';
+    const results=report.comparison?.results||[],recommendation=report.comparison?.recommendation;
+    return `<div class="flow-diagnosis-result" role="status"><p class="flow-inspection-summary">${h(report.summary||'检测完成，请核对证据。')}</p>${results.length?`<ul class="flow-route-comparison">${results.map(item=>`<li><strong>${h(item.name||'检测路径')}</strong><span class="${item.ok?'flow-path-pass':'flow-path-unknown'}">${h(item.label||'尚未确认')}</span></li>`).join('')}</ul>`:''}${recommendation?.reason?`<p class="field-note">${h(recommendation.reason)}</p>`:''}${(report.next_steps||[]).length?`<ol class="flow-next-steps">${report.next_steps.map(step=>`<li>${h(step)}</li>`).join('')}</ol>`:''}${report.comparison?.scope?`<p class="field-note">${h(report.comparison.scope)}</p>`:''}<p class="flow-evidence-time">本次证据：${h(report.captured_at||'时间未返回')} · 检测成功不代表原软件业务成功</p></div>`;
+  }
+  function appFlowRecommendationTarget(report){
+    const choice=report?.recommendation;if(!choice)return null;
+    return appFlowTargets().find(item=>!item.unavailable&&(choice.mode==='http_environment'?item.type==='http'&&item.proxy_url===choice.proxy_url:choice.mode==='clear_environment'?item.type==='clear':choice.mode==='inherit'&&item.type==='inherit'));
+  }
+  function appFlowAdoptRecommendation(){
+    if(state.appFlowBusy)return;const c=channel(state.selected.id);if(!c)return;
+    const flow=appFlowWorkflowSync(c.app_id),destination=appFlowRecommendationTarget(flow.diagnosis);
+    if(!destination)return toast('建议入口已不可用，请重新检测。',true);
+    state.appDraftTargets[c.app_id]=destination.id;appFlowInvalidate(c.app_id);appFlowWorkflowSync(c.app_id);
+    appFlowMessage(c.app_id,'建议已放入连线草稿。核对后保存，再预览应用；尚未改变软件。');renderGraph();renderInspector();
+  }
+  function appFlowReview(id){
+    const flow=appFlowWorkflowSync(id),entry=flow.review;
+    if(!entry)return '';
+    if(!appFlowCurrent(id,entry.context,true)||Date.now()>entry.expires){flow.review=null;return '<p class="field-note">应用预览已失效，请重新预览。</p>';}
+    const prepared=entry.prepared;
+    return `<div class="flow-apply-review"><h4>本次操作预览</h4><p>${h(prepared.summary||'请核对本次操作。')}</p><ol>${(prepared.steps||[]).map(step=>`<li>${h(step)}</li>`).join('')}</ol><p>${h(prepared.notice||'')}</p>${prepared.requires_confirmation?'<p class="flow-review-impact">包含后台变更。请先核对影响范围与正在进行的任务。</p>':''}${prepared.can_launch===true?`<button id="flow-apply" class="button button-primary full-width" ${state.appFlowBusy?'disabled':''}>确认并应用</button>`:''}<button id="flow-cancel-review" class="button button-quiet full-width" ${state.appFlowBusy?'disabled':''}>取消本次预览</button></div>`;
   }
   function renderAppFlowInspector(){
     const host=$('#inspector-content');$('#selection-type').textContent='应用连接';
+    const selection=state.selected.kind+':'+state.selected.id;
+    if(state.appFlowInspectorSelection!==selection){
+      state.appFlowInspectorSelection=selection;state.appFlowSelectionEpoch=(state.appFlowSelectionEpoch||0)+1;
+      Object.values(state.appFlowWorkflows||{}).forEach(flow=>{flow.review=null;});
+    }
     if(state.selected.kind==='protected'){const app=appFlowApps().find(item=>item.id===state.selected.id);host.innerHTML=`<h3>${h(app?.name||'受保护软件')}</h3><p class="field-note">当前工作连接或网络基础组件受保护，请在软件自身界面操作。</p>`;return;}
     if(state.selected.kind==='context'){const tool=appFlowTool(state.selected.id);host.innerHTML=tool?appFlowToolInspector(tool):'<p>该网络工具已不在当前快照，请重新自动检测。</p>';return;}
     if(state.selected.kind==='target'){const item=target(state.selected.id),tool=item&&appFlowToolForTarget(item);host.innerHTML=item?`<h3>${h(item.name)}</h3><p class="field-note">${h(item.proxy_url||'新进程连接方式')}</p><p class="field-note">点击软件的输出圆点，再点击此节点的输入圆点，最后在软件属性中保存。</p>${tool?appFlowToolInspector(tool):''}`:'<p>入口已变化，请重新识别。</p>';return;}
-    const c=channel(state.selected.id),app=c&&appFlowApps().find(item=>item.id===c.app_id),route=app&&appFlowRoute(app.id);if(!app||!route){host.innerHTML='<h3>在图中设置软件连接</h3><p class="field-note">① 从左侧添加软件<br>② 将软件右侧端口连接到代理或默认方式<br>③ 在这里保存连接设置并启动</p>';return;}
-    const saved=appFlowSaved(app.id),hermes=route.integration?.id==='hermes',message=state.appFlowMessages?.[app.id];
-    const status=hermes?(saved?'已保存。先检查 Hermes 窗口与独立后台；首次应用可能需要从 Hermes 菜单正常退出旧窗口，后台处理会另行预览。':'选择 Hermes 要用的连接方式并保存，再检查窗口与后台如何采用设置。'):route.running?'目标正在运行；保存后需正常退出目标，再从此处启动。':saved?'可按保存的连接方式启动该软件。':'保存后，再按设置启动目标软件。';
-    host.innerHTML=`<div class="selected-node-heading"><span class="app-symbol">${h(app.name.slice(0,1))}</span><div><h3>${h(app.name)}</h3><p>${saved?'已保存 · 实际采用情况待检查':'当前连线尚未保存'}</p></div></div><label class="field"><span>连接到</span><select id="flow-destination">${appFlowTargets().map(item=>`<option value="${h(item.id)}" ${item.id===appFlowTargetId(app.id)?'selected':''} ${item.unavailable?'disabled':''}>${h(item.name)}</option>`).join('')}</select></label><p class="field-note">在画布上连线与这里选择是同一设置。保存不会立即改变软件的连接。</p><div class="flow-application-status">${h(status)}</div>${route.integration?`<div class="flow-integration-note"><strong>${h(route.integration.label||'应用接入方式')}</strong><p>${h(route.integration.notice||'')}</p>${route.integration.id==='installer'?'<p>这是安装器，仅影响安装过程。日常连接请添加安装后的 Hermes 主程序。</p>':''}</div>`:''}<p class="field-note">应用方式：${h(route.method)}<br>${h(route.notice)}</p><button id="flow-inspect" class="button button-outline full-width" ${state.appFlowBusy?'disabled':''}>检查此软件</button><div id="flow-inspection">${appFlowInspection(app.id)}</div><button id="flow-save" class="button button-primary full-width" ${!route.can_apply||state.appFlowBusy?'disabled':''}>保存连接设置</button><button id="flow-launch" class="button button-outline full-width" ${!route.can_apply||!saved||state.appFlowBusy?'disabled':''}>${hermes?'应用并打开':'按此设置启动'}</button><button id="flow-shortcut" class="button button-outline full-width" ${!route.can_apply||!saved||state.appFlowBusy?'disabled':''}>创建桌面快捷方式</button><p class="flow-shortcut-note">以后双击桌面快捷方式，使用这里保存的设置，无需输入 Launch。${hermes?'Hermes 会复用设置一致的后台。':''}连接方式修改后，先在这里保存。</p>${!route.can_apply?'<p class="field-note">尚未确认主程序路径，请使用“添加软件”选择该软件的 .exe。</p><button class="text-button" data-flow-add>选择主程序</button>':''}<p id="flow-action-message" class="field-note ${message?.error?'danger-text':''}" role="status">${h(message?.text||'')}</p><details class="flow-test"><summary>检测这条连接</summary><label class="field"><span>失败地址 · 可选</span><input id="flow-test-url" placeholder="https://…" autocomplete="off"></label><button id="flow-test-button" class="button button-quiet">检测入口与目标</button><p id="flow-test-result" class="field-note"></p></details><p class="field-note">${h(route.executable||'')}</p>${state.appRoutes.error?`<div class="notice danger">${h(state.appRoutes.error)}</div>`:''}`;
+    const c=channel(state.selected.id),app=c&&appFlowApps().find(item=>item.id===c.app_id),route=app&&appFlowRoute(app.id);if(!app||!route){host.innerHTML='<h3>在图中设置软件连接</h3><p class="field-note">从左侧添加软件，再按右侧步骤检查、诊断、应用并验证。</p>';return;}
+    const saved=appFlowSaved(app.id),managed=Boolean(route.capabilities?.managed_backend),message=state.appFlowMessages?.[app.id],flow=appFlowWorkflowSync(app.id),verification=flow.verification;
+    const status=managed?'这个软件由独立后台发送部分请求。应用前会检查窗口、后台身份与任务状态，具体操作先预览。':route.running?'目标正在运行。需要变更启动环境时，请先正常退出，再按预览应用。':'保存后可预览本次启动方式。';
+    const result=verification?.application_result,resultText=result?.source==='user_report'?(result.status==='resolved'?'你已确认：原软件操作成功':'你已反馈：原软件仍然失败，请根据新证据继续诊断'):'原软件业务结果尚未确认；请回到原软件重试，再记录结果。';
+    const progress=result?.source==='user_report'?(result.status==='resolved'?'用户反馈已恢复':'用户反馈仍然失败'):verification?'检查已完成，等待原软件复测':flow.applied?'已执行应用，等待验证':'尚未确认实际生效';
+    const recommended=appFlowRecommendationTarget(flow.diagnosis),busy=state.appFlowBusy?'disabled':'';
+    host.innerHTML=`<div class="selected-node-heading"><span class="app-symbol">${h(app.name.slice(0,1))}</span><div><h3>${h(app.name)}</h3><p>${saved?'连接设置已保存':'当前连线尚未保存'} · ${progress}</p></div></div>
+      <ol class="flow-workflow-nav" aria-label="处理流程"><li>1 检查</li><li>2 诊断</li><li>3 应用</li><li>4 验证</li></ol>
+      <label class="field" for="flow-destination"><span>连接到</span><select id="flow-destination" aria-label="连接到">${appFlowTargets().map(item=>`<option value="${h(item.id)}" ${item.id===appFlowTargetId(app.id)?'selected':''} ${item.unavailable?'disabled':''}>${h(item.name)}</option>`).join('')}</select></label><p class="field-note">在画布上连线与这里选择是同一设置。保存不会立即改变软件的连接。</p>
+      <section class="flow-workflow-step"><h3><b>1</b> 检查当前软件</h3><p class="field-note">${saved?'按已保存的设置核对当前进程。':'当前连线未保存；检查与诊断以已保存设置为准，无保存时按默认设置。'}</p><button id="flow-inspect" class="button button-outline full-width" ${busy}>检查此软件</button><div id="flow-inspection">${appFlowInspection(app.id)}</div></section>
+      <section class="flow-workflow-step"><h3><b>2</b> 诊断并选择下一步</h3><label class="field"><span>遇到问题的公开地址 · 可留空</span><input id="flow-workflow-url" type="url" value="${h(flow.url)}" placeholder="https://…" autocomplete="off" spellcheck="false" maxlength="2048"></label><p class="field-note">留空只检查软件；填写后比较工作台访问该地址的路径。请勿填入账号、令牌或查询参数。</p><button id="flow-diagnose" class="button button-outline full-width" ${busy}>诊断此软件</button><button id="flow-open-catalog" class="button button-quiet full-width">查看此软件的设置与日志</button><div id="flow-diagnosis-evidence">${appFlowReport(flow.diagnosis)}${flow.diagnosis?.recommendation?`<button id="flow-adopt-recommendation" class="button button-outline full-width" ${!recommended||state.appFlowBusy?'disabled':''}>将建议放入连线草稿</button><p class="field-note">${recommended?'只修改草稿，下一步由你保存并预览应用。':'建议入口当前未被识别，请重新自动检测后诊断。'}</p>`:''}</div></section>
+      <section class="flow-workflow-step"><h3><b>3</b> 保存并预览应用</h3><div class="flow-application-status">${h(status)}</div>${route.integration?`<div class="flow-integration-note"><strong>${h(route.integration.label||'应用接入方式')}</strong><p>${h(route.integration.notice||'')}</p></div>`:''}<p class="field-note">应用方式：${h(route.method)}<br>${h(route.notice)}</p><button id="flow-save" class="button button-primary full-width" ${!route.can_apply||state.appFlowBusy?'disabled':''}>保存连接设置</button><button id="flow-launch" class="button button-outline full-width" ${!route.can_apply||!saved||state.appFlowBusy?'disabled':''}>预览应用步骤</button><div id="flow-review">${appFlowReview(app.id)}</div>${!route.can_apply?'<p class="field-note">当前接入方式不可用。请核对上方适配说明；路径未确认时选择准确主程序。</p><button class="text-button" data-flow-add>选择主程序</button>':''}</section>
+      <section class="flow-workflow-step"><h3><b>4</b> 验证并记录实际结果</h3><p class="field-note">重新核对软件是否采用已保存设置；上方填有地址时再探测这条路径。实际操作结果由你在原软件确认。</p><button id="flow-verify" class="button button-outline full-width" ${!saved||state.appFlowBusy?'disabled':''}>验证已保存设置</button><div id="flow-verification-evidence">${verification?appFlowCheckReport(verification.inspection||{summary:'未返回软件检查',checks:[]}):''}${appFlowReport(verification)}<p class="flow-business-result ${result?.status==='failed'?'danger-text':''}">${h(resultText)}</p>${verification?`<div class="flow-feedback-actions"><button id="flow-feedback-resolved" class="button button-outline" ${busy}>原软件已正常</button><button id="flow-feedback-failed" class="button button-outline" ${busy}>仍然失败</button></div>`:''}</div></section>
+      <button id="flow-shortcut" class="button button-outline full-width" ${!route.can_apply||!saved||state.appFlowBusy?'disabled':''}>创建桌面快捷方式</button><p class="flow-shortcut-note">以后双击使用最新保存的设置，无需输入 Launch。连接修改后先保存；快捷启动仍会检查适用的操作条件。</p><p id="flow-action-message" class="field-note ${message?.error?'danger-text':''}" role="status">${h(message?.text||'')}</p><p class="field-note">${h(route.executable||'')}</p>${state.appRoutes.error?`<div class="notice danger">${h(state.appRoutes.error)}</div>`:''}`;
   }
   async function appFlowAction(action){
     if(state.appFlowBusy)return;const c=channel(state.selected.id);if(!c)return;const choice=appFlowChoice(c.app_id);if(!choice)return;
-    if(['launch','shortcut'].includes(action)&&!appFlowSaved(c.app_id))return toast('连线已变化，请先保存连接设置。',true);
-    const sourceId=c.app_id,signature=JSON.stringify(choice);state.appFlowBusy=true;renderInspector();
+    if(['launch','apply','shortcut','verify','feedback-resolved','feedback-failed'].includes(action)&&!appFlowSaved(c.app_id))return toast('连线已变化，请先保存连接设置。',true);
+    const sourceId=c.app_id,context=appFlowContext(sourceId),flow=appFlowWorkflow(sourceId);state.appFlowBusy=true;renderInspector();
+    // Rendering may be the first observation of this selected node.
+    context.selection=state.appFlowSelectionEpoch||0;
     try{
       if(action==='inspect'){
-        const report=await api('/api/app-routes/inspect','POST',{app_id:sourceId});(state.appFlowInspections??={})[sourceId]=report;
-        appFlowMessage(sourceId,'检查完成。请根据各项结果决定是否应用设置。');
-        if(appFlowSelected(sourceId))renderInspector();
-        return;
+        if(state.appFlowInspections)delete state.appFlowInspections[sourceId];
+        flow.review=null;flow.diagnosis=null;flow.verification=null;renderInspector();
+        const report=await api('/api/app-routes/inspect','POST',{app_id:sourceId});
+        if(!appFlowCurrent(sourceId,context))return appFlowMessage(sourceId,'设置已变化，本次检查结果未采用，请重新检查。');
+        (state.appFlowInspections??={})[sourceId]=report;appFlowMessage(sourceId,'检查完成。继续诊断可结合目标地址比较路径。');return;
+      }
+      if(['diagnose','verify'].includes(action)){
+        const slot=action==='diagnose'?'diagnosis':'verification';flow[slot]=null;flow.review=null;if(action==='diagnose')flow.verification=null;renderInspector();
+        appFlowMessage(sourceId,action==='diagnose'?'正在刷新本机信息并诊断…':'正在核对已保存设置…');
+        const report=await api('/api/app-routes/'+action,'POST',{app_id:sourceId,...(context.url?{url:context.url}:{})});
+        if(!appFlowCurrent(sourceId,context))return appFlowMessage(sourceId,'设置或地址已变化，本次结果未采用，请重新检测。');
+        if(report.app_id!==sourceId||report.stage!==action||!report.check_id)throw new Error('返回的检查记录与此软件不一致，请重新检测。');
+        flow[slot]=report;(state.appFlowInspections??={})[sourceId]=report.inspection;
+        appFlowMessage(sourceId,action==='verify'?'已重新核对设置。请在原软件重试，再记录实际结果。':'诊断完成。先阅读证据和下一步，建议不会自动应用。');return;
+      }
+      if(action.startsWith('feedback-')){
+        const report=flow.verification;if(!report)throw new Error('请先验证已保存设置，再记录原软件结果。');
+        const outcome=action==='feedback-resolved'?'resolved':'failed',result=await api('/api/app-routes/feedback','POST',{app_id:sourceId,check_id:report.check_id,outcome});
+        if(!appFlowCurrent(sourceId,context)||flow.verification?.check_id!==report.check_id)return;
+        if(result.check_id!==report.check_id||result.application_result?.source!=='user_report'||result.application_result?.status!==outcome)throw new Error('服务未返回对应的实际操作记录，请重新验证。');
+        flow.verification={...report,application_result:result.application_result};appFlowMessage(sourceId,result.message||'已记录原软件的实际结果。');return;
       }
       if(action==='shortcut'){
         const result=await api('/api/app-routes/shortcut','POST',{app_id:sourceId});
-        appFlowMessage(sourceId,result.notice||'桌面快捷方式已创建。以后双击即可使用已保存的连接设置。');
-        activity('已创建应用代理快捷方式，尚未启动目标软件。','应用连接');return;
+        appFlowMessage(sourceId,result.notice||'桌面快捷方式已创建。以后双击即可使用已保存的连接设置。');activity('已创建应用代理快捷方式，尚未启动目标软件。','应用连接');return;
       }
-      let payload=choice;
       if(action==='launch'){
-        appFlowMessage(sourceId,'正在检查本次应用步骤…');
+        flow.review=null;appFlowMessage(sourceId,'正在检查并准备本次应用步骤…');
         const prepared=await api('/api/app-routes/prepare-launch','POST',{app_id:sourceId});
-        if(prepared.can_launch!==true)throw new Error(prepared.summary||prepared.notice||'当前不能应用，请先检查此软件。');
-        if(!prepared.ticket)throw new Error('服务未返回有效的应用预览，请重新检查。');
-        if(!appFlowSelected(sourceId)||JSON.stringify(appFlowChoice(sourceId))!==signature||!appFlowSaved(sourceId))throw new Error('所选软件或连接方式已变化，请重新点击应用。');
-        if(prepared.requires_confirmation){
-          const steps=(Array.isArray(prepared.steps)?prepared.steps:[]).map((step,index)=>`${index+1}. ${step}`).join('\n');
-          if(!confirm([prepared.summary,steps,prepared.notice,'是否按以上步骤继续？'].filter(Boolean).join('\n\n'))){appFlowMessage(sourceId,'已取消，本次没有应用或重启软件。');return;}
-        }
-        if(!appFlowSelected(sourceId)||JSON.stringify(appFlowChoice(sourceId))!==signature||!appFlowSaved(sourceId))throw new Error('所选软件或连接方式已变化，请重新点击应用。');
-        payload={app_id:sourceId,ticket:prepared.ticket};appFlowMessage(sourceId,'正在应用已确认的连接设置，请稍候…');
+        if(!appFlowCurrent(sourceId,context,true)||!appFlowSaved(sourceId))throw new Error('所选软件或连接方式已变化，请重新预览。');
+        if(prepared.can_launch===true&&!prepared.ticket)throw new Error('服务未返回有效的应用预览，请重新检查。');
+        flow.review={prepared,context,expires:Date.now()+180000};
+        appFlowMessage(sourceId,prepared.can_launch?'预览已准备。核对步骤后点击“确认并应用”；目前尚未启动或重启软件。':prepared.summary||'当前不能应用，请按预览提示处理。',prepared.can_launch!==true);return;
       }
-      const result=await api('/api/app-routes/'+action,'POST',payload);state.appRoutes=result;state.appFlowSignature=JSON.stringify(result);
+      if(action!=='save'&&action!=='apply')return;
+      let payload=choice,endpoint=action;
+      if(action==='apply'){
+        const review=flow.review;flow.review=null;
+        if(!review||review.prepared.can_launch!==true||!review.prepared.ticket||Date.now()>review.expires||!appFlowCurrent(sourceId,review.context,true))throw new Error('本次预览已失效，请重新预览应用步骤。');
+        payload={app_id:sourceId,ticket:review.prepared.ticket};endpoint='launch';appFlowMessage(sourceId,'正在应用已确认的连接设置，请稍候…');
+      }
+      // Even a failed response may follow a partial backend change.
+      appFlowInvalidate(sourceId);renderInspector();
+      const result=await api('/api/app-routes/'+endpoint,'POST',payload);
+      if(!result||!Array.isArray(result.routes))throw new Error('服务未返回完整连接状态，请刷新后核对结果。');
+      state.appRoutes=result;state.appFlowSignature=JSON.stringify(result);
       const current=appFlowChoice(sourceId);if(current?.mode===choice.mode&&current.proxy_url===choice.proxy_url)delete state.appDraftTargets[sourceId];
-      if(state.appFlowInspections)delete state.appFlowInspections[sourceId];
-      const hermes=appFlowRoute(sourceId)?.integration?.id==='hermes';
-      appFlowMessage(sourceId,action==='save'?(hermes?'连接设置已保存。点击“应用并打开”检查并应用；旧窗口需要退出时会明确提示，后台处理会先预览。':'连接设置已保存。正常退出目标软件后，点击“按此设置启动”。'):result.launch?.notice||'应用操作已返回，请在目标软件中验证实际连接。');
-      renderGraph();renderInspector();activity(action==='save'?'应用连接设置已保存，尚未应用。':'已执行确认的应用连接操作，请在目标软件中验证。','应用连接');
-    }catch(error){appFlowMessage(sourceId,error.message,true);toast(error.message,true);}
+      appFlowInvalidate(sourceId);const updated=appFlowWorkflowSync(sourceId);updated.applied=action==='apply';
+      appFlowMessage(sourceId,action==='save'?'连接设置已保存。下一步预览应用；保存本身没有改变软件。':result.launch?.notice||'应用操作已返回。继续第 4 步验证，并在原软件重试。');
+      renderGraph();activity(action==='save'?'应用连接设置已保存，尚未应用。':'已执行确认的应用连接操作，请继续验证。','应用连接');
+    }catch(error){appFlowMessage(sourceId,error.message,true);if(appFlowSelected(sourceId))toast(error.message,true);}
     finally{state.appFlowBusy=false;renderInspector();}
   }
-  async function appFlowTest(){
-    const c=channel(state.selected.id),choice=c&&appFlowChoice(c.app_id),url=$('#flow-test-url')?.value.trim();if(!choice||!url)return toast('填写这条连接需要访问的目标地址。',true);
-    const destination=target(appFlowTargetId(c.app_id));if(destination?.type==='inherit')return toast('默认设置由目标软件决定，不能用工作台请求替代验证；请在软件中实际操作。');
-    const explicit=destination?.type==='http'?{id:'flow-test',type:'http',host:destination.host,port:destination.port}:{id:'flow-test',type:'direct'};
-    if(destination?.type==='http'&&!explicit.host){try{const address=new URL(destination.proxy_url);explicit.host=address.hostname.replace(/^\[|\]$/g,'');explicit.port=Number(address.port);}catch(_){return toast('入口无效，请重新识别。',true);}}
-    const button=$('#flow-test-button');button.disabled=true;
-    try{const report=await api('/api/probe','POST',{url,target_id:'flow-test',plan:{version:1,name:'当前连线检测',targets:[explicit],channels:[{id:'flow-test-channel',default_target:'flow-test',rules:[]}]}});const output=$('#flow-test-result');if(output)output.textContent=report.layers.map(item=>`${item.layer}: ${item.status}${item.http_status?' · HTTP '+item.http_status:''}`).join(' / ')+'。这只验证工作台请求；目标软件需实际重试。';}
-    catch(error){const output=$('#flow-test-result');if(output)output.textContent=error.message;}finally{if($('#flow-test-button'))$('#flow-test-button').disabled=false;}
+  function appFlowCancelReview(){
+    if(state.appFlowBusy)return;const c=channel(state.selected.id);if(!c)return;
+    appFlowWorkflow(c.app_id).review=null;appFlowMessage(c.app_id,'已取消本次预览，没有应用或重启软件。');renderInspector();
+  }
+  function appFlowOpenCatalog(){
+    const c=channel(state.selected.id),app=c&&appFlowApps().find(item=>item.id===c.app_id);if(!app)return;
+    if(!state.catalog?.apps?.some(item=>item.id===app.id))state.catalog=state.appRoutes.catalog;
+    state.catalogSelected=app.id;state.profileResult=null;appFlowWorkflow(app.id).review=null;
+    $('#catalog-search').value='';$('#catalog-running-only').checked=false;
+    switchWorkspace('catalog');$('#catalog-detail').scrollTop=0;
+  }
+  function appFlowInspectorClick(event){
+    if(!state.appMode)return;
+    if(event.target.closest('[data-flow-add]'))showCatalogAdd();
+    const actions={'flow-save':'save','flow-launch':'launch','flow-apply':'apply','flow-inspect':'inspect','flow-shortcut':'shortcut','flow-diagnose':'diagnose','flow-verify':'verify','flow-feedback-resolved':'feedback-resolved','flow-feedback-failed':'feedback-failed'};
+    for(const [id,action] of Object.entries(actions))if(event.target.closest('#'+id)){appFlowAction(action);return;}
+    if(event.target.closest('#flow-adopt-recommendation'))appFlowAdoptRecommendation();
+    if(event.target.closest('#flow-cancel-review'))appFlowCancelReview();
+    if(event.target.closest('#flow-open-catalog'))appFlowOpenCatalog();
+    const toolCheck=event.target.closest('[data-flow-check-tool]');if(toolCheck)appFlowToolCheck(toolCheck.dataset.flowCheckTool);
   }
   function renderLibrary() {
     if(state.appMode)return renderAppFlowLibrary();
+    $('#library-toggle-count').textContent=String(recipes.length);
     const query = $('#app-search').value.toLowerCase(); $('#app-count').textContent = state.snapshot ? `${(state.snapshot.apps || []).length} 项本机记录` : '方案参考';
     $('#application-library').innerHTML = recipes.filter(r=>`${r.name}${r.note}`.toLowerCase().includes(query)).map(r=>{const app=observedApp(r), running=Array.isArray(app?.running_processes) ? app.running_processes.length : 0;const status=app ? running ? `已观察 ${running} 个进程 · 路线待验证` : '检测到应用记录 · 未确认运行' : r.note;return `<div class="app-card ${r.protected?'protected':''}" data-app="${h(r.id)}" draggable="${!r.protected && !['dns','uu'].includes(r.id)}"><span class="app-symbol ${h(r.category)}">${h(r.symbol)}</span><div class="app-card-copy"><strong>${h(r.name)}</strong><small class="${app?'observed':''}">${h(status)}</small></div>${r.protected?`${icon('lock')}`:`<button class="app-add" data-add-app="${h(r.id)}" aria-label="${['dns','uu'].includes(r.id)?'查看只读上下文':`将${h(r.name)}加入方案`}">${icon(['dns','uu'].includes(r.id)?'search':'plus')}</button>`}</div>`;}).join('');
   }
@@ -299,7 +435,7 @@
     const card=$$('[data-rule-card]').find(item=>item.dataset.ruleCard===ruleId);
     card?.scrollIntoView({block:'nearest',behavior:'smooth'});card?.querySelector('textarea')?.focus({preventScroll:true});
   }
-  function showInspector() {if(state.compact)$('.main-grid').classList.add('inspector-open');}
+  function showInspector() {setCompactPanel('inspector',true);}
   function focusedNodes(nodes) {
     if(!state.focusMode)return nodes;
     const selected=state.selected;let focus=selected.kind==='channel'?nodes.find(n=>n.channels?.some(c=>c.id===selected.id)):selected.kind==='protected'?nodes.find(n=>n.kind==='protected'):selected.kind==='context'?nodes.find(n=>n.id===`context:${selected.id}`):null;
@@ -349,9 +485,9 @@
     if(state.appMode)return renderAppFlowEdges();
     const paths=[];state.plan.channels.forEach(c=>{const outputs=[...c.rules.map(r=>({rule:r,to:r.target})),{rule:null,to:c.default_target}];outputs.forEach(item=>{const output=$$('[data-channel-output]').find(e=>e.dataset.channelOutput===c.id && (e.dataset.ruleOutput||null)===(item.rule?.id||null)),input=$$('[data-target-input]').find(e=>e.dataset.targetInput===item.to);if(!output||!input)return;const a=point(output),b=point(input),running=relayChannelStatus(c).loaded;paths.push(`<path class="graph-edge ${running?'running':''} ${state.selected.id===c.id?'selected':''}" d="${curve(a,b)}" data-edge-channel="${h(c.id)}" data-edge-rule="${h(item.rule?.id||'')}" marker-end="url(#${running?'edge-arrow':'edge-arrow-draft'})"/><text class="edge-label" x="${(a.x+b.x)/2}" y="${(a.y+b.y)/2-7}">${h(FlowDeskRouting.edgeLabel(item.rule))}</text>`);});});$('#edge-layer').innerHTML=paths.join('');
   }
-  function fit() {const viewport=$('#graph-viewport'),nodes=$$('.graph-node');if(!nodes.length)return;const maxX=Math.max(...nodes.map(n=>parseFloat(n.style.left)+n.offsetWidth)),maxY=Math.max(...nodes.map(n=>parseFloat(n.style.top)+n.offsetHeight));const minX=Math.min(...nodes.map(n=>parseFloat(n.style.left))),minY=Math.min(...nodes.map(n=>parseFloat(n.style.top)));const zoom=Math.min(1.05,Math.max(.25,Math.min((viewport.clientWidth-75)/(maxX-minX),(viewport.clientHeight-100)/(maxY-minY))));state.view={zoom,x:(viewport.clientWidth-(maxX-minX)*zoom)/2-minX*zoom,y:55-minY*zoom};applyView();requestEdges();}
+  function fit() {state.viewAutoFit=true;const viewport=$('#graph-viewport'),nodes=$$('.graph-node');if(!nodes.length)return;const maxX=Math.max(...nodes.map(n=>parseFloat(n.style.left)+n.offsetWidth)),maxY=Math.max(...nodes.map(n=>parseFloat(n.style.top)+n.offsetHeight));const minX=Math.min(...nodes.map(n=>parseFloat(n.style.left))),minY=Math.min(...nodes.map(n=>parseFloat(n.style.top)));const zoom=Math.min(1.05,Math.max(.25,Math.min((viewport.clientWidth-75)/(maxX-minX),(viewport.clientHeight-100)/(maxY-minY))));state.view={zoom,x:(viewport.clientWidth-(maxX-minX)*zoom)/2-minX*zoom,y:55-minY*zoom};applyView();requestEdges();}
   function overview() {state.focusMode=false;renderGraph();requestAnimationFrame(fit);}
-  function zoom(factor,x,y) {const viewport=$('#graph-viewport');x??=viewport.clientWidth/2;y??=viewport.clientHeight/2;const next=Math.max(.3,Math.min(1.65,state.view.zoom*factor)),ratio=next/state.view.zoom;state.view.x=x-(x-state.view.x)*ratio;state.view.y=y-(y-state.view.y)*ratio;state.view.zoom=next;applyView();requestEdges();}
+  function zoom(factor,x,y) {state.viewAutoFit=false;const viewport=$('#graph-viewport');x??=viewport.clientWidth/2;y??=viewport.clientHeight/2;const next=Math.max(.3,Math.min(1.65,state.view.zoom*factor)),ratio=next/state.view.zoom;state.view.x=x-(x-state.view.x)*ratio;state.view.y=y-(y-state.view.y)*ratio;state.view.zoom=next;applyView();requestEdges();}
   function selectNode(node) {if(state.appMode&&node.kind==='source')state.appFlowSelected=node.channels[0].id;state.selected=node.kind==='target'?{kind:'target',id:node.target.id}:node.kind==='protected'?{kind:'protected',id:'codex'}:node.kind==='context'?{kind:'context',id:node.category||'dns'}:{kind:'channel',id:node.channels[0].id};renderGraph();renderInspector();showInspector();}
   function connect(to) {if(state.appMode)return appFlowConnect(to);if(!state.pending){state.selected={kind:'target',id:to};renderGraph();renderInspector();return;}checkpoint();const c=channel(state.pending.channel);if(!c)return;const rule=state.pending.rule?c.rules.find(r=>r.id===state.pending.rule):null;if(rule)rule.target=to;else c.default_target=to;const name=c.name;cancelConnection();changed(`设计连线：${name} → ${targetName(to)}；尚未改变运行中的应用。`);}
   function cancelConnection() {state.pending=null;$('#connection-hint').hidden=true;$('#pending-edge').setAttribute('d','');$$('.port-button.pending').forEach(e=>e.classList.remove('pending'));}
@@ -591,15 +727,15 @@
   $('#help-button').addEventListener('click',()=>$('#help-dialog').showModal());$$('[data-close-dialog]').forEach(button=>button.addEventListener('click',()=>button.closest('dialog').close()));
   $('#rename-button').addEventListener('click',()=>{const value=prompt('方案名称',state.plan.name);if(value?.trim()){checkpoint();state.plan.name=value.trim();changed('已修改方案名称。',false);}});
   $('#export-button').addEventListener('click',()=>exportData('plan'));$('#diagnostic-export-button').addEventListener('click',()=>exportData('diagnostics'));$('#import-button').addEventListener('click',()=>$('#import-file').click());$('#import-file').addEventListener('change',async event=>{const file=event.target.files[0];if(!file)return;try{if(file.size>2*1024*1024)throw new Error('方案文件超过 2 MiB。');const plan=normalizePlan(JSON.parse(await file.text()));checkpoint();state.plan=plan;const c=plan.channels.find(c=>category(c.app_id)!=='codex');state.selected=c?{kind:'channel',id:c.id}:{kind:'context',id:'dns'};changed('已导入设计方案；只读取允许的方案字段，不导入认证或系统设置。');requestAnimationFrame(fit);}catch(error){toast(error.message,true);}event.target.value='';});
-  $('#app-search').addEventListener('input',renderLibrary);$('#application-library').addEventListener('click',event=>{const add=event.target.closest('[data-add-app]'),card=event.target.closest('[data-app]');if(add)addApp(add.dataset.addApp);else if(card)addApp(card.dataset.app);});$('#application-library').addEventListener('dragstart',event=>{if(appFlowToolDragStart(event))return;const card=event.target.closest('[data-app]');if(!card||['codex','dns','uu'].includes(card.dataset.app))return event.preventDefault();event.dataTransfer.setData('application/x-flowdesk-app',card.dataset.app);event.dataTransfer.effectAllowed='copy';});$$('[data-add-target]').forEach(button=>button.addEventListener('click',()=>addTarget(button.dataset.addTarget)));
+  $('#app-search').addEventListener('input',renderLibrary);$('#application-library').addEventListener('click',event=>{const add=event.target.closest('[data-add-app]'),card=event.target.closest('[data-app]');if(add)addApp(add.dataset.addApp);else if(card)addApp(card.dataset.app);});$('#application-library').addEventListener('dragstart',event=>{if(appFlowToolDragStart(event)){requestAnimationFrame(()=>setCompactPanel('library',false));return;}const card=event.target.closest('[data-app]');if(!card||['codex','dns','uu'].includes(card.dataset.app))return event.preventDefault();event.dataTransfer.setData('application/x-flowdesk-app',card.dataset.app);event.dataTransfer.effectAllowed='copy';requestAnimationFrame(()=>setCompactPanel('library',false));});$$('[data-add-target]').forEach(button=>button.addEventListener('click',()=>addTarget(button.dataset.addTarget)));
   $('#graph-viewport').addEventListener('dragover',event=>{event.preventDefault();event.dataTransfer.dropEffect='copy';});$('#graph-viewport').addEventListener('drop',event=>{event.preventDefault();if(appFlowToolDrop(event))return;const id=event.dataTransfer.getData('application/x-flowdesk-app');if(!id)return;const rect=$('#graph-viewport').getBoundingClientRect();addApp(id,{x:Math.max(15,(event.clientX-rect.left-state.view.x)/state.view.zoom),y:Math.max(40,(event.clientY-rect.top-state.view.y)/state.view.zoom)});});
   $('#node-layer').addEventListener('click',event=>{if(pointer?.moved)return;const input=event.target.closest('[data-target-input]');if(input){connect(input.dataset.targetInput);return;}const output=event.target.closest('[data-channel-output]');if(output){state.pending={channel:output.dataset.channelOutput,rule:output.dataset.ruleOutput||null};state.selected={kind:'channel',id:state.pending.channel};$('#connection-hint').hidden=false;renderGraph();renderInspector();showInspector();return;}const edit=event.target.closest('[data-edit-rule]');if(edit&&!state.appMode){selectRelayRule(edit.dataset.ruleChannel,edit.dataset.editRule);return;}const article=event.target.closest('[data-node]');if(article){const node=state.worldNodes.find(n=>n.id===article.dataset.node);if(node)selectNode(node);}});
   $('#graph-connections').addEventListener('click',event=>{if(event.target.dataset.edgeChannel){if(event.target.dataset.edgeRule&&!state.appMode)selectRelayRule(event.target.dataset.edgeChannel,event.target.dataset.edgeRule);else{state.selected={kind:'channel',id:event.target.dataset.edgeChannel};renderGraph();renderInspector();showInspector();}}});
   $('#node-layer').addEventListener('keydown',event=>{const article=event.target.closest('[data-node]');if(!article||event.target.closest('button'))return;const node=state.worldNodes.find(n=>n.id===article.dataset.node);if(!node)return;if(event.key==='Enter'){event.preventDefault();selectNode(node);}if(event.altKey&&['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key)){event.preventDefault();checkpoint();const amount=event.shiftKey?40:10;node.position.x=Math.max(0,node.position.x+(event.key==='ArrowRight'?amount:event.key==='ArrowLeft'?-amount:0));node.position.y=Math.max(0,node.position.y+(event.key==='ArrowDown'?amount:event.key==='ArrowUp'?-amount:0));setNodePosition(node.id,node.position);changed('',false);article.style.left=node.position.x+'px';article.style.top=node.position.y+'px';requestEdges();}});
   $('#graph-viewport').addEventListener('pointerdown',event=>{if(event.button!==0&&event.button!==1)return;const title=event.target.closest('.node-title');if(title&&!spaceDown&&event.button===0){const article=title.closest('[data-node]'),node=state.worldNodes.find(n=>n.id===article.dataset.node);pointer={kind:'node',node,article,startX:event.clientX,startY:event.clientY,x:node.position.x,y:node.position.y,moved:false};title.setPointerCapture(event.pointerId);event.preventDefault();}else if(spaceDown||event.button===1||event.target===event.currentTarget){pointer={kind:'pan',startX:event.clientX,startY:event.clientY,x:state.view.x,y:state.view.y,moved:false};event.currentTarget.setPointerCapture(event.pointerId);event.currentTarget.classList.add('panning');event.preventDefault();}});
-  $('#graph-viewport').addEventListener('pointermove',event=>{if(pointer){const dx=event.clientX-pointer.startX,dy=event.clientY-pointer.startY;if(Math.abs(dx)+Math.abs(dy)>4&&!pointer.moved){if(pointer.kind==='node')checkpoint();pointer.moved=true;}if(pointer.kind==='node'&&pointer.moved){pointer.node.position={x:Math.max(0,pointer.x+dx/state.view.zoom),y:Math.max(0,pointer.y+dy/state.view.zoom)};pointer.article.style.left=pointer.node.position.x+'px';pointer.article.style.top=pointer.node.position.y+'px';requestEdges();}else if(pointer.kind==='pan'){state.view.x=pointer.x+dx;state.view.y=pointer.y+dy;applyView();}}if(state.pending){const output=$$('[data-channel-output]').find(e=>e.dataset.channelOutput===state.pending.channel&&(e.dataset.ruleOutput||null)===state.pending.rule);if(output){const world=$('#graph-world').getBoundingClientRect();$('#pending-edge').setAttribute('d',curve(point(output),{x:(event.clientX-world.left)/state.view.zoom,y:(event.clientY-world.top)/state.view.zoom}));}}});
-  function endPointer() {if(!pointer)return;const current=pointer;if(current.kind==='node'&&current.moved){setNodePosition(current.node.id,current.node.position);changed('',false);}if(current.kind==='pan'){if(state.appMode)appFlowPersist();else{state.plan.layout.viewport={...state.view};persistLocal();}}$('#graph-viewport').classList.remove('panning');setTimeout(()=>{if(pointer===current)pointer=null;},0);}
-  $('#graph-viewport').addEventListener('pointerup',endPointer);$('#graph-viewport').addEventListener('pointercancel',endPointer);$('#graph-viewport').addEventListener('wheel',event=>{event.preventDefault();const rect=event.currentTarget.getBoundingClientRect();if(event.ctrlKey||event.metaKey)zoom(event.deltaY>0?.9:1.1,event.clientX-rect.left,event.clientY-rect.top);else{state.view.x-=event.shiftKey?event.deltaY:event.deltaX;state.view.y-=event.shiftKey?0:event.deltaY;applyView();}},{passive:false});
+  $('#graph-viewport').addEventListener('pointermove',event=>{if(pointer){const dx=event.clientX-pointer.startX,dy=event.clientY-pointer.startY;if(Math.abs(dx)+Math.abs(dy)>4&&!pointer.moved){if(pointer.kind==='node')checkpoint();pointer.moved=true;}if(pointer.kind==='node'&&pointer.moved){pointer.node.position={x:Math.max(0,pointer.x+dx/state.view.zoom),y:Math.max(0,pointer.y+dy/state.view.zoom)};pointer.article.style.left=pointer.node.position.x+'px';pointer.article.style.top=pointer.node.position.y+'px';requestEdges();}else if(pointer.kind==='pan'){state.viewAutoFit=false;state.view.x=pointer.x+dx;state.view.y=pointer.y+dy;applyView();}}if(state.pending){const output=$$('[data-channel-output]').find(e=>e.dataset.channelOutput===state.pending.channel&&(e.dataset.ruleOutput||null)===state.pending.rule);if(output){const world=$('#graph-world').getBoundingClientRect();$('#pending-edge').setAttribute('d',curve(point(output),{x:(event.clientX-world.left)/state.view.zoom,y:(event.clientY-world.top)/state.view.zoom}));}}});
+  function endPointer() {if(!pointer)return;const current=pointer;if(current.kind==='node'&&current.moved){setNodePosition(current.node.id,current.node.position);changed('',false);}if(current.kind==='pan'){if(state.appMode)appFlowPersist();else{state.plan.layout.viewport={...state.view};persistLocal();}}$('#graph-viewport').classList.remove('panning');setTimeout(()=>{if(pointer===current){pointer=null;resizeCanvas();}},0);}
+  $('#graph-viewport').addEventListener('pointerup',endPointer);$('#graph-viewport').addEventListener('pointercancel',endPointer);$('#graph-viewport').addEventListener('wheel',event=>{event.preventDefault();const rect=event.currentTarget.getBoundingClientRect();if(event.ctrlKey||event.metaKey)zoom(event.deltaY>0?.9:1.1,event.clientX-rect.left,event.clientY-rect.top);else{state.viewAutoFit=false;state.view.x-=event.shiftKey?event.deltaY:event.deltaX;state.view.y-=event.shiftKey?0:event.deltaY;applyView();}},{passive:false});
   $('#cancel-connection').addEventListener('click',cancelConnection);$('#zoom-in').addEventListener('click',()=>zoom(1.16));$('#zoom-out').addEventListener('click',()=>zoom(.86));$('#fit-button').addEventListener('click',overview);$('#zoom-value').addEventListener('click',overview);$('#arrange-button').addEventListener('click',()=>{if(state.appMode){state.appLayout={};appFlowPersist();renderGraph();requestAnimationFrame(fit);return;}checkpoint();state.plan.layout.nodes={};state.plan.layout.focus_nodes={};changed('已整理设计节点的位置。');requestAnimationFrame(fit);});
   $('#inspector-content').addEventListener('change',event=>{const input=event.target,c=channel(state.selected.id),t=target(state.selected.id);if(input.dataset.channelField&&c){checkpoint();c[input.dataset.channelField]=input.dataset.channelField==='listen_port'?Number(input.value):input.value;changed('已修改通道草稿；尚未应用到运行入口。');}else if(input.dataset.targetField&&t){checkpoint();const key=input.dataset.targetField;t[key]=key==='port'?Number(input.value):key==='interface_index'?(input.value?Number(input.value):undefined):input.value;if(key==='type'){if(t.type!=='direct')delete t.interface_index;if(!['http','socks5'].includes(t.type)){delete t.host;delete t.port;}else{t.host||='127.0.0.1';t.port||=0;}}changed('已修改出口草稿；需重新预览验证。');}else if(input.dataset.ruleDomains&&c){checkpoint();const rule=c.rules.find(r=>r.id===input.dataset.ruleDomains);if(rule)rule.domains=input.value.split(/[\n,]+/).map(v=>v.trim()).filter(Boolean);changed('已修改这些网站的匹配范围；还需预览并应用。');}else if(input.dataset.ruleTarget&&c){checkpoint();const rule=c.rules.find(r=>r.id===input.dataset.ruleTarget);if(rule)rule.target=input.value;changed('已修改这些网站的连接方式；还需预览并应用。');}else if(input.id==='dns-overrides'){const mappings={};try{input.value.split('\n').filter(v=>v.trim()).forEach(line=>{const index=line.indexOf('=');if(index<1)throw new Error('映射格式为 精确域名 = IP，每行一项。');const host=line.slice(0,index).trim(),ip=line.slice(index+1).trim();if(!host||!ip||host.includes('*'))throw new Error('映射需要精确域名与 IP，不支持通配符。');mappings[host]=ip;});checkpoint();state.plan.dns_overrides=mappings;changed('已编辑本中继的显式解析映射；未修改系统 hosts。');}catch(error){toast(error.message,true);}}});
   $('#inspector-content').addEventListener('click',event=>{if(event.target.closest('[data-open-app-connections]')){const appId=channel(state.selected.id)?.app_id;if(!state.appMode)$('#flow-mode-toggle').click();if(appFlowApps().some(app=>app.id===appId))appFlowAdd(appId);return;}const select=event.target.closest('[data-select-channel]'),remove=event.target.closest('[data-remove-rule]'),mapping=event.target.closest('[data-add-dns-host]');if(select){state.selected={kind:'channel',id:select.dataset.selectChannel};renderGraph();renderInspector();showInspector();return;}const c=channel(state.selected.id);if(remove&&c){checkpoint();c.rules=c.rules.filter(r=>r.id!==remove.dataset.removeRule);changed('已从设计中删除规则。');}else if(event.target.closest('#add-rule-button')&&c){checkpoint();c.rules.push({id:ids('rule'),domains:[],target:state.plan.targets.find(t=>['http','socks5'].includes(t.type))?.id||c.default_target});changed('已添加网站例外；先填写网站，再选择它们的连接方式。');}else if(event.target.closest('#remove-channel-button')&&c){checkpoint();state.plan.channels=state.plan.channels.filter(item=>item.id!==c.id);state.selected=state.plan.channels[0]?{kind:'channel',id:state.plan.channels[0].id}:{kind:'context',id:'dns'};changed('已从设计方案移除通道；当前运行入口仍按原方案处理，需重新预览。');}else if(event.target.closest('#probe-button'))probe();else if(event.target.closest('#resolve-button'))resolve();else if(mapping){checkpoint();state.plan.dns_overrides[mapping.dataset.addDnsHost]=mapping.dataset.addDnsIp;changed('已把本次观察地址显式加入方案草稿；没有修改系统 hosts。');}});
@@ -607,7 +743,7 @@
   document.addEventListener('click',async event=>{const button=event.target.closest('[data-copy]');if(!button)return;try{await navigator.clipboard.writeText(button.dataset.copy);toast('已复制本地入口；需要在支持的应用中显式使用。');}catch(_){toast(`请复制：${button.dataset.copy}`);}});
   $$('[data-dock]').forEach(button=>button.addEventListener('click',()=>switchDock(button.dataset.dock)));$('#expand-dock').addEventListener('click',()=>{const expanded=$('.workbench').classList.toggle('dock-expanded');$('#expand-dock').setAttribute('aria-label',expanded?'收起活动面板':'展开活动面板');requestEdges();});
   $('#system-preview-button').addEventListener('click',systemPreview);$('#system-preview-content').addEventListener('change',event=>{if(event.target.id==='system-consent')$('#system-apply-button').disabled=state.systemPreview?.allowed!==true||!event.target.checked;});$('#system-apply-button').addEventListener('click',systemApply);$('#system-confirm-button').addEventListener('click',()=>systemAction('confirm'));$('#system-restore-button').addEventListener('click',()=>systemAction('restore'));
-  document.addEventListener('keydown',event=>{if(state.workspace!=='routing')return;const editing=/INPUT|TEXTAREA|SELECT/.test(event.target.tagName);if(event.key==='Escape')cancelConnection();if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();if(state.appMode)appFlowAction('save');else save();}if(editing)return;if(event.code==='Space'&&!event.target.closest('button,a,summary,[role=button]')){spaceDown=true;event.preventDefault();}if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='z'){if(state.appMode)return;event.preventDefault();const previous=state.undo.pop();if(previous){state.plan=previous;changed('已撤销一次方案编辑。');}}if(event.key==='0')overview();if(event.key==='+'||event.key==='=')zoom(1.12);if(event.key==='-')zoom(.89);});document.addEventListener('keyup',event=>{if(event.code==='Space')spaceDown=false;});window.addEventListener('blur',()=>{spaceDown=false;endPointer();});new ResizeObserver(()=>{const compact=innerWidth<=1000;if(compact!==state.compact){state.compact=compact;$('.main-grid').classList.toggle('compact',compact);renderGraph();requestEdges();}else requestEdges();}).observe($('#graph-viewport'));
+  document.addEventListener('keydown',event=>{if(state.workspace!=='routing')return;const editing=/INPUT|TEXTAREA|SELECT/.test(event.target.tagName);if(event.key==='Escape'){cancelConnection();closeCompactPanels(true);}if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();if(state.appMode)appFlowAction('save');else save();}if(editing)return;if(event.code==='Space'&&!event.target.closest('button,a,summary,[role=button]')){spaceDown=true;event.preventDefault();}if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='z'){if(state.appMode)return;event.preventDefault();const previous=state.undo.pop();if(previous){state.plan=previous;changed('已撤销一次方案编辑。');}}if(event.key==='0')overview();if(event.key==='+'||event.key==='=')zoom(1.12);if(event.key==='-')zoom(.89);});document.addEventListener('keyup',event=>{if(event.code==='Space')spaceDown=false;});window.addEventListener('blur',()=>{spaceDown=false;endPointer();});new ResizeObserver(resizeCanvas).observe($('#graph-viewport'));
 
   async function poll() {
     if(polling||state.busy||location.protocol==='file:')return;polling=true;
@@ -618,7 +754,7 @@
   }
   async function init() {
     let local=null;try{const raw=localStorage.getItem('flowdesk.plan.v1');if(raw){const stored=JSON.parse(raw);local=normalizePlan(stored.plan||stored);state.plan=local;state.dirty=Boolean(stored.dirty);}}catch(_){}
-    $('.main-grid').classList.toggle('compact',state.compact);renderAll();activity('设计工作台已打开。方案、观察、中继和真实应用证据分别展示。');requestAnimationFrame(()=>requestAnimationFrame(fit));
+    $('.main-grid').classList.toggle('compact',state.compact);syncCompactPanels();renderAll();activity('设计工作台已打开。方案、观察、中继和真实应用证据分别展示。');requestAnimationFrame(()=>requestAnimationFrame(fit));
     if(location.protocol==='file:'){renderHeader();return;}
     try{const data=await refresh(false),server=normalizePlan(data.plan);if((local&&JSON.stringify(local)!==JSON.stringify(server))||state.dirty){state.recoveredDraft=true;state.dirty=true;activity('已恢复本地差异草稿；没有用服务器方案覆盖，可明确选择恢复服务器方案。');}else state.plan=server;
       if(state.selected.kind==='channel'&&!channel(state.selected.id))state.selected=state.plan.channels[0]?{kind:'channel',id:state.plan.channels[0].id}:{kind:'context',id:'dns'};renderAll();activity('已读取本机保存状态；不会自动修改代理或应用。','本机观察');requestAnimationFrame(fit);
@@ -627,9 +763,11 @@
   }
 
   $('#restore-server-plan').addEventListener('click',()=>{if(!state.serverPlan)return;checkpoint();state.plan=clone(state.serverPlan);state.dirty=false;state.recoveredDraft=false;persistLocal();const first=state.plan.channels[0];state.selected=first?{kind:'channel',id:first.id}:{kind:'context',id:'dns'};renderAll();activity('已明确恢复服务器保存方案；原草稿可用 Ctrl+Z 撤销恢复。');fit();});
-  $('#toggle-library').addEventListener('click',()=>$('.main-grid').classList.toggle('library-open'));
-  $('#toggle-inspector').addEventListener('click',()=>$('.main-grid').classList.toggle('inspector-open'));
-  $('#close-inspector').addEventListener('click',()=>$('.main-grid').classList.remove('inspector-open'));
+  $('#toggle-library').addEventListener('click',()=>setCompactPanel('library',!$('.main-grid').classList.contains('library-open'),true));
+  $('#toggle-inspector').addEventListener('click',()=>setCompactPanel('inspector',!$('.main-grid').classList.contains('inspector-open'),true));
+  $('#close-library').addEventListener('click',()=>setCompactPanel('library',false,true));
+  $('#close-inspector').addEventListener('click',()=>setCompactPanel('inspector',false,true));
+  $('#compact-panel-backdrop').addEventListener('click',()=>closeCompactPanels(true));
   $('#focus-view').addEventListener('click',()=>{state.focusMode=!state.focusMode;renderGraph();requestAnimationFrame(fit);});
   $('#shutdown-button').addEventListener('click',()=>{if(!confirm('关闭网页不会退出后台。现在退出后台服务？本工具将先尝试恢复原系统代理，再停止本地入口；使用这些入口的应用连接会断开。'))return;task($('#shutdown-button'),async()=>{const result=await api('/api/shutdown','POST',{});state.connected=false;state.runtime={running:false,channels:[]};renderAll();toast('后台退出请求已返回。此网页可关闭；要再运行请重新启动程序。');activity('已请求退出本工具后台；不是停止 v2rayN 或 Codex。','中继状态');});});
   $$('[data-workspace]').forEach(button=>button.addEventListener('click',()=>switchWorkspace(button.dataset.workspace)));
@@ -649,7 +787,8 @@
   document.addEventListener('flowdesk:add-app',()=>showCatalogAdd());
   $('#application-library').addEventListener('click',event=>{if(event.target.closest('[data-flow-add]'))showCatalogAdd();appFlowToolClick(event);});
   $('#application-library').addEventListener('keydown',appFlowToolKeydown);
-  $('#inspector-content').addEventListener('click',event=>{if(!state.appMode)return;if(event.target.closest('[data-flow-add]'))showCatalogAdd();if(event.target.closest('#flow-save'))appFlowAction('save');if(event.target.closest('#flow-launch'))appFlowAction('launch');if(event.target.closest('#flow-inspect'))appFlowAction('inspect');if(event.target.closest('#flow-shortcut'))appFlowAction('shortcut');const toolCheck=event.target.closest('[data-flow-check-tool]');if(toolCheck)appFlowToolCheck(toolCheck.dataset.flowCheckTool);if(event.target.closest('#flow-test-button'))appFlowTest();});
+  $('#inspector-content').addEventListener('click',appFlowInspectorClick);
+  $('#inspector-content').addEventListener('input',event=>{if(event.target.id==='flow-workflow-url')appFlowUrlInput(event.target.value);});
   $('#inspector-content').addEventListener('change',event=>{if(state.appMode&&event.target.id==='flow-destination'){const c=channel(state.selected.id);if(c){state.appDraftTargets[c.app_id]=event.target.value;renderGraph();renderInspector();}}});
   $('#flow-mode-toggle').addEventListener('click',()=>{state.appMode=!state.appMode;$('.workbench').classList.toggle('app-flow-active',state.appMode&&state.workspace==='routing');$('.main-grid').classList.toggle('app-connection-mode',state.appMode);$('.routing-workspace').classList.toggle('app-connection-mode',state.appMode);$('#flow-mode-toggle').textContent=state.appMode?'高级中继规则':'返回应用连接';state.selected={kind:'channel',id:state.appMode?appFlowChannels()[0]?.id:state.plan.channels[0]?.id};renderAll();requestAnimationFrame(fit);if(state.appMode)appFlowLoad();});
   document.addEventListener('flowdesk:catalog-mutated',async event=>{state.appFlowSignature=null;if(state.appMode)state.appPendingAdd=event.detail?.app_id;await appFlowLoad();});

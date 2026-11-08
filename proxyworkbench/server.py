@@ -132,6 +132,12 @@ class Handler(BaseHTTPRequestHandler):
                 result = service.app_route_launch(value)
             elif key == ('POST', '/api/app-routes/inspect'):
                 result = service.app_route_inspect(value)
+            elif key == ('POST', '/api/app-routes/diagnose'):
+                result = service.app_route_workflow(value, 'diagnose')
+            elif key == ('POST', '/api/app-routes/verify'):
+                result = service.app_route_workflow(value, 'verify')
+            elif key == ('POST', '/api/app-routes/feedback'):
+                result = service.app_route_feedback(value)
             elif key == ('POST', '/api/app-routes/prepare-launch'):
                 result = service.app_route_prepare(value)
             elif key == ('POST', '/api/app-routes/shortcut'):
